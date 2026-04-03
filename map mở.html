@@ -303,23 +303,47 @@ const GameUtils = {
 const container = document.getElementById('game-container');
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0x060609); scene.fog = new THREE.FogExp2(0x060609, 0.001);
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 4000);
-const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" }); 
-renderer.setSize(window.innerWidth, window.innerHeight); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); 
-renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: false }); 
+renderer.setSize(window.innerWidth, window.innerHeight); 
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.0)); // Tăng độ nét
+renderer.shadowMap.enabled = true; 
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// Bật Tone Mapping chuẩn điện ảnh và hệ màu sRGB
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1; // Chỉnh độ phơi sáng
 container.appendChild(renderer.domElement);
 
 const renderScene = new THREE.RenderPass(scene, camera);
 const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
-bloomPass.threshold = 0.3; bloomPass.strength = 0.6; bloomPass.radius = 0.5;
+bloomPass.threshold = 0.6; // Chỉ phát sáng những phép thuật thực sự rực rỡ, không làm nhòe cả bản đồ
+bloomPass.strength = 1.2;  // Tăng cường độ sáng của phép thuật
+bloomPass.radius = 0.8;    // Quầng sáng to và mềm mại hơn
 const composer = new THREE.EffectComposer(renderer); composer.addPass(renderScene); composer.addPass(bloomPass);
 
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); scene.add(ambientLight); // Đã tăng từ 0.35 lên 0.8
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.2); // Đã tăng từ 0.7 lên 1.2
-dirLight.position.set(100, 300, 100); dirLight.castShadow = true;
-dirLight.shadow.mapSize.width = 1024; dirLight.shadow.mapSize.height = 1024; 
-dirLight.shadow.camera.near = 10; dirLight.shadow.camera.far = 1500;
-dirLight.shadow.camera.left = -1000; dirLight.shadow.camera.right = 1000;
-dirLight.shadow.camera.top = 1000; dirLight.shadow.camera.bottom = -1000;
+// Ánh sáng môi trường nhẹ
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.3); 
+scene.add(ambientLight);
+
+// Ánh sáng bán cầu (trên màu trời, dưới màu đất) giúp mô hình nổi khối 3D
+const hemiLight = new THREE.HemisphereLight(0xe0f2fe, 0x1e293b, 0.6); 
+hemiLight.position.set(0, 500, 0);
+scene.add(hemiLight);
+
+// Ánh sáng mặt trời (Đổ bóng)
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+dirLight.position.set(200, 400, 150); 
+dirLight.castShadow = true;
+// Nâng cấp độ phân giải bóng đổ lên 2048 để bóng mượt hơn
+dirLight.shadow.mapSize.width = 2048; 
+dirLight.shadow.mapSize.height = 2048; 
+dirLight.shadow.camera.near = 10; 
+dirLight.shadow.camera.far = 1500;
+dirLight.shadow.camera.left = -1000; 
+dirLight.shadow.camera.right = 1000;
+dirLight.shadow.camera.top = 1000; 
+dirLight.shadow.camera.bottom = -1000;
+dirLight.shadow.bias = -0.0005; // Giảm hiện tượng đứt gãy bóng (Shadow acne)
 scene.add(dirLight);
 
 const geoCache = {
@@ -328,10 +352,18 @@ const geoCache = {
     torus: new THREE.TorusGeometry(1, 0.2, 5, 10), circle: new THREE.CircleGeometry(1, 12)
 };
 const matCache = {};
-function getMaterial(color, emissive = 0x000000, metalness = 0.1, roughness = 0.7, opacity = 1.0) {
-    let key = color + "_" + emissive + "_" + opacity;
+function getMaterial(color, emissive = 0x000000, metalness = 0.2, roughness = 0.5, opacity = 1.0) {
+    // Tinh chỉnh mặc định: metalness và roughness thấp hơn để mô hình hơi bóng bẩy như nhựa/đồ chơi
+    let key = color + "_" + emissive + "_" + metalness + "_" + opacity;
     if(!matCache[key]) {
-        let mat = new THREE.MeshStandardMaterial({ color: color, roughness: roughness, metalness: metalness, emissive: emissive, emissiveIntensity: emissive ? 0.7 : 0 });
+        let mat = new THREE.MeshStandardMaterial({ 
+            color: color, 
+            roughness: roughness, 
+            metalness: metalness, 
+            emissive: emissive, 
+            emissiveIntensity: emissive ? 1.2 : 0,
+            envMapIntensity: 1.0 // Sẵn sàng cho môi trường HDRI nếu có
+        });
         if(opacity < 1.0) { mat.transparent = true; mat.opacity = opacity; }
         matCache[key] = mat;
     }
