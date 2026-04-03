@@ -426,7 +426,7 @@ function clearMap() {
     mapHazards.forEach(h => scene.remove(h.mesh)); mapHazards = [];
     groundMarks.forEach(m => scene.remove(m.mesh)); groundMarks = [];
     scene.fog.color.setHex(0x060609); scene.background.setHex(0x060609);
-    ambientLight.color.setHex(0xffffff); ambientLight.intensity = 0.8; // Cập nhật lại khi clear map
+    ambientLight.color.setHex(0xffffff); ambientLight.intensity = 0.3; // Cập nhật lại khi clear map
     currentMap = null; mapTicks = 0; CONFIG.knockbackScale = 1.5;
 }
 
