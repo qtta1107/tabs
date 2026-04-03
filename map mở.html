@@ -1,0 +1,1504 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Totally Accurate 3D - Multi-Map Engine</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
+    <style>
+        :root {
+            --blue: #3b82f6; --red: #ef4444; --bg: #09090e; 
+            --ui-bg: rgba(15, 20, 25, 0.6); --text: #f8fafc;
+        }
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background-color: var(--bg);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none; touch-action: none;
+        }
+        #game-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        
+        /* --- LOBBY / MAP SELECTION --- */
+        #map-selection {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle at center, #1a1a2e 0%, #000000 100%);
+            z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            color: white; padding: 20px; box-sizing: border-box;
+        }
+        #map-selection h1 { font-size: 3rem; margin-bottom: 10px; text-shadow: 0 0 20px rgba(255,255,255,0.5); letter-spacing: 2px;}
+        #map-selection p { font-size: 1.2rem; color: #a1a1aa; margin-bottom: 40px; }
+        
+        .map-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;
+            max-width: 1200px; width: 100%;
+        }
+        .map-card {
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px; padding: 20px; cursor: pointer; transition: all 0.3s;
+            position: relative; overflow: hidden;
+        }
+        .map-card:hover { transform: translateY(-5px); background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.3); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .map-icon { font-size: 2.5rem; margin-bottom: 10px; }
+        .map-title { font-size: 1.2rem; font-weight: bold; margin-bottom: 8px; color: #fbbf24; }
+        .map-desc { font-size: 0.9rem; color: #d4d4d8; line-height: 1.4; }
+        
+        /* --- SLEEK UI LAYER --- */
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; z-index: 10;
+            display: none; /* Hidden until map selected */
+        }
+        
+        .sleek-panel {
+            background: var(--ui-bg); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 12px; padding: 10px 20px; pointer-events: auto; color: white;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        #top-hud { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 30px; transition: top 0.5s; }
+        .team-hud { display: flex; align-items: center; gap: 10px; font-weight: bold; font-size: 18px; }
+        .blue-text { color: var(--blue); text-shadow: 0 0 10px var(--blue); } 
+        .red-text { color: var(--red); text-shadow: 0 0 10px var(--red); }
+        
+        #bottom-hud { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 1000px; transition: bottom 0.5s; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+        
+        #class-tabs { display: flex; gap: 5px; justify-content: center; }
+        .class-tab {
+            background: transparent; color: rgba(255,255,255,0.5); padding: 8px 15px; border-radius: 20px;
+            cursor: pointer; font-weight: bold; font-size: 14px; transition: all 0.2s;
+            display: flex; align-items: center; gap: 6px; border: 1px solid transparent; pointer-events: auto;
+        }
+        .class-tab:hover { color: white; background: rgba(255,255,255,0.1); }
+        .class-tab.active { color: white; background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.3); }
+        .class-icon { font-size: 16px; font-family: 'Segoe UI Symbol', sans-serif; }
+
+        #unit-selector { 
+            display: flex; gap: 8px; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
+            width: 100%; padding: 10px; box-sizing: border-box; pointer-events: auto;
+        }
+        #unit-selector::-webkit-scrollbar { height: 4px; }
+        #unit-selector::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 10px; }
+        
+        .unit-btn {
+            background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); color: white;
+            border-radius: 8px; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; 
+            align-items: center; justify-content: center; min-width: 70px; height: 70px; padding: 5px;
+        }
+        .unit-btn:hover { background: rgba(255,255,255,0.1); transform: translateY(-2px); }
+        .unit-btn.active { border-color: #fbbf24; background: rgba(251, 191, 36, 0.2); box-shadow: inset 0 0 10px rgba(251,191,36,0.3); }
+        .unit-dot { width: 14px; height: 14px; border-radius: 50%; margin-bottom: 4px; box-shadow: 0 0 5px currentColor; }
+        .unit-name { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; text-align: center; }
+        .unit-cost { font-size: 11px; font-weight: bold; color: #fbbf24; margin-top: 2px;}
+
+        #action-buttons { position: absolute; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 10px; transition: right 0.5s; }
+        .action-btn {
+            width: 50px; height: 50px; border-radius: 50%; border: none; color: white; font-size: 20px;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5); transition: all 0.2s; pointer-events: auto; background: var(--ui-bg); backdrop-filter: blur(5px); border: 1px solid rgba(255,255,255,0.1);
+        }
+        .action-btn:hover { transform: scale(1.1); background: rgba(255,255,255,0.2); }
+        #btn-start { width: auto; padding: 0 20px; border-radius: 25px; background: #10b981; font-weight: bold; font-size: 16px;}
+        #btn-start:hover { background: #059669; }
+        #btn-back { position: absolute; top: 20px; left: 20px; width: auto; padding: 0 15px; border-radius: 8px; font-size: 14px; font-weight: bold; pointer-events: auto;}
+
+        /* BATTLE MODE HIDES UI */
+        body.is-battle #top-hud { top: -100px; }
+        body.is-battle #bottom-hud { bottom: -200px; }
+        body.is-battle #action-buttons { right: -100px; }
+        body.is-battle #help-text { opacity: 0; }
+        
+        #floating-stop {
+            position: absolute; top: 20px; right: 20px; z-index: 100; opacity: 0; pointer-events: none; transition: opacity 0.5s;
+            background: #ef4444; border: none; color: white; padding: 10px 20px; font-weight: bold; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); cursor: pointer;
+        }
+        body.is-battle #floating-stop { opacity: 0.8; pointer-events: auto; }
+        body.is-battle #floating-stop:hover { opacity: 1; transform: scale(1.05);}
+
+        #help-text { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); font-size: 12px; color: rgba(255,255,255,0.5); pointer-events: none; background: rgba(0,0,0,0.8); padding: 8px 20px; border-radius: 20px; transition: opacity 0.3s; font-weight: bold; border: 1px solid rgba(255,255,255,0.2); pointer-events: auto;}
+        #btn-close-help { color: #ef4444; cursor: pointer; margin-left: 15px; font-size: 18px; font-weight: 900; }
+
+        #warning-msg {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            font-size: 40px; font-weight: bold; color: white; text-shadow: 0 4px 10px rgba(0,0,0,0.8);
+            pointer-events: none; opacity: 0; transition: opacity 0.5s; text-align: center;
+            background: rgba(0,0,0,0.8); padding: 20px 40px; border-radius: 20px; backdrop-filter: blur(5px);
+            border: 2px solid rgba(255,255,255,0.1); z-index: 200;
+        }
+        .show-warning { opacity: 1 !important; }
+
+        /* END SCREEN */
+        #end-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7); backdrop-filter: blur(5px);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity 0.5s; z-index: 300;
+        }
+        #end-title { font-size: clamp(50px, 10vw, 120px); font-weight: bold; color: white; text-shadow: 0 0 30px currentColor; margin-bottom: 30px; text-transform: uppercase; transform: scale(0.5); transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .show-end #end-screen { opacity: 1; pointer-events: auto; }
+        .show-end #end-title { transform: scale(1); }
+    </style>
+</head>
+<body>
+
+<div id="game-container"></div>
+
+<!-- LOBBY SCREEN -->
+<div id="map-selection">
+    <h1>CHỌN BẢN ĐỒ CHIẾN THUẬT</h1>
+    <p>8 Chiến trường với cơ chế Vật lý và Môi trường hoàn toàn khác biệt</p>
+    <div class="map-grid" id="map-grid-container">
+        <!-- Cards injected via JS -->
+    </div>
+</div>
+
+<!-- GAME UI LAYER -->
+<div id="ui-layer">
+    <button class="action-btn" id="btn-back">⬅ LOBBY</button>
+    <div id="top-hud" class="sleek-panel">
+        <div class="team-hud blue-text">BLUE: <span id="blue-budget">5000</span></div>
+        <div style="color: rgba(255,255,255,0.2);">|</div>
+        <div class="team-hud red-text"><span id="red-budget">5000</span> :RED</div>
+    </div>
+    
+    <div id="help-text">Trái: Đặt | Phải: Xoá | Giữa/WASD: Di chuyển Camera <span id="btn-close-help" style="cursor: pointer; margin-left: 10px; color: #ef4444; font-weight: bold;">✖</span></div>
+
+    <div id="action-buttons">
+        <button class="action-btn" id="btn-sandbox" title="Toggle Sandbox Mode">♾️</button>
+        <button class="action-btn" id="btn-clear" title="Clear Board" style="color: #ef4444;">🗑️</button>
+        <button class="action-btn" id="btn-start">PLAY</button>
+    </div>
+
+    <div id="bottom-hud" class="sleek-panel">
+        <div id="class-tabs"></div>
+        <div class="bottom-row">
+            <div id="unit-selector"></div>
+        </div>
+    </div>
+</div>
+
+<button id="floating-stop">🛑 STOP & EDIT</button>
+
+<div id="warning-msg">Cần quân cả 2 bên!</div>
+
+<div id="end-screen">
+    <div id="end-title">VICTORY</div>
+    <button class="action-btn" id="btn-restart" style="width: auto; padding: 15px 40px; border-radius: 30px; font-size: 20px; background: #3b82f6;">CHƠI LẠI (ENTER)</button>
+</div>
+
+<script>
+/**
+ * TABS 3D ENGINE - V11.2 MULTI-MAP & ADVANCED PHYSICS ARCHITECTURE
+ */
+
+const CONFIG = {
+    maxUnits: 400, maxParticles: 500,
+    gravity: 1.2, cameraSmooth: 0.15, knockbackScale: 1.5,
+    budget: 5000, worldSize: 2500, friction: 0.85
+};
+
+const CLASS_CONFIG = {
+    'Bruiser': { icon: '⚔', label: 'Bruiser' },
+    'Tank':    { icon: '⛨', label: 'Tank' },
+    'Ranged':  { icon: '🎯', label: 'Ranged' },
+    'Mage':    { icon: '✧', label: 'Mage' },
+    'Assassin':{ icon: '🗡', label: 'Assassin' },
+    'Support': { icon: '✚', label: 'Support' },
+    'Tech':    { icon: '⚙', label: 'Tech' },
+    'Chaos':   { icon: '⚄', label: 'Chaos' }
+};
+
+const UNIT_TYPES = {
+    // BRUISER
+    CLUBBER:      { name: 'Clubber', class: 'Bruiser', cost: 100, hp: 100, speed: 0.6, damage: 20, range: 15, cd: 60, mass: 1, radius: 4, height: 12, color: 0xfcd34d, weapon: 'CLUB' },
+    SPEARMAN:     { name: 'Spearman', class: 'Bruiser', cost: 150, hp: 80, speed: 0.65, damage: 30, range: 35, cd: 70, mass: 1.2, radius: 4, height: 12, color: 0x9ca3af, weapon: 'POLE' },
+    DASH_XIN:     { name: 'Dash Spear', class: 'Bruiser', cost: 520, hp: 520, speed: 1.1, damage: 130, range: 35, cd: 55, mass: 1.5, radius: 4, height: 13, color: 0x2563eb, weapon: 'POLE' },
+    AXE_BERSERK:  { name: 'Axe Berserk', class: 'Bruiser', cost: 650, hp: 650, speed: 0.8, damage: 120, range: 25, cd: 75, mass: 2, radius: 5, height: 14, color: 0x8b0000, weapon: 'AXE' },
+    DUELIST:      { name: 'Spin Duelist', class: 'Bruiser', cost: 800, hp: 800, speed: 0.9, damage: 90, range: 25, cd: 10, mass: 2, radius: 5, height: 14, color: 0x1d4ed8, weapon: 'SWORD' },
+    RAGE_SETT:    { name: 'Rage Boxer', class: 'Bruiser', cost: 950, hp: 900, speed: 0.9, damage: 100, range: 20, cd: 60, mass: 2, radius: 5, height: 14, color: 0x9f1239, weapon: 'FIST' },
+
+    // TANK
+    TANK:         { name: 'Shield Tank', class: 'Tank', cost: 400, hp: 600, speed: 0.35, damage: 40, range: 20, cd: 80, mass: 4, radius: 6, height: 14, color: 0x475569, weapon: 'SWORD_SHIELD' },
+    ROLLING_RAM:  { name: 'Rolling Beast', class: 'Tank', cost: 900, hp: 900, speed: 2.0, damage: 150, range: 20, cd: 20, mass: 3, radius: 6, height: 8, color: 0x854d0e, weapon: 'NONE' },
+    ANCHOR_NAUT:  { name: 'Anchor Tank', class: 'Tank', cost: 1100, hp: 1100, speed: 0.4, damage: 160, range: 150, cd: 140, mass: 4, radius: 8, height: 18, color: 0x0f766e, weapon: 'ANCHOR' },
+    ELASTIC_ZAC:  { name: 'Elastic Giant', class: 'Tank', cost: 1200, hp: 1200, speed: 0.6, damage: 200, range: 25, cd: 100, mass: 3, radius: 8, height: 18, color: 0x16a34a, weapon: 'NONE' },
+    STONE_MALPH:  { name: 'Stone Guard', class: 'Tank', cost: 1300, hp: 1300, speed: 0.5, damage: 250, range: 30, cd: 150, mass: 5, radius: 9, height: 16, color: 0x57534e, weapon: 'NONE' },
+
+    // RANGED
+    ARCHER:       { name: 'Archer', class: 'Ranged', cost: 200, hp: 60, speed: 0.5, damage: 25, range: 150, cd: 90, mass: 0.8, radius: 3.5, height: 10, color: 0x4ade80, weapon: 'BOW' },
+    BOOMERANG:    { name: 'Boomerang', class: 'Ranged', cost: 600, hp: 350, speed: 0.9, damage: 140, range: 150, cd: 90, mass: 1, radius: 4, height: 12, color: 0xeab308, weapon: 'BOOMERANG' },
+    ROCKET_GIRL:  { name: 'Rocket Girl', class: 'Ranged', cost: 700, hp: 300, speed: 0.8, damage: 200, range: 300, cd: 120, mass: 1, radius: 4, height: 11, color: 0xdb2777, weapon: 'ROCKET' },
+    ARROW_ASHE:   { name: 'Arrow Rain', class: 'Ranged', cost: 750, hp: 300, speed: 0.7, damage: 40, range: 250, cd: 100, mass: 1, radius: 4, height: 12, color: 0x38bdf8, weapon: 'BOW' },
+    SNIPER_CAIT:  { name: 'Piercing Sniper', class: 'Ranged', cost: 800, hp: 260, speed: 0.5, damage: 250, range: 500, cd: 150, mass: 1, radius: 4, height: 12, color: 0x4f46e5, weapon: 'GUN' },
+
+    // MAGE
+    ICE_LISS:     { name: 'Ice Prison', class: 'Mage', cost: 700, hp: 400, speed: 0.7, damage: 90, range: 150, cd: 100, mass: 1.2, radius: 4.5, height: 13, color: 0x60a5fa, weapon: 'NONE' },
+    FIRE_ANNIE:   { name: 'Fire Orb', class: 'Mage', cost: 800, hp: 270, speed: 0.7, damage: 180, range: 180, cd: 120, mass: 1, radius: 3.5, height: 10, color: 0xef4444, weapon: 'NONE' },
+    PORTAL_ZOE:   { name: 'Trickster', class: 'Mage', cost: 850, hp: 250, speed: 1.2, damage: 180, range: 200, cd: 80, mass: 1, radius: 3.5, height: 10, color: 0xd946ef, weapon: 'NONE' },
+    GRAVITY_MAGE: { name: 'Gravity Mage', class: 'Mage', cost: 900, hp: 280, speed: 0.8, damage: 50, range: 150, cd: 150, mass: 1, radius: 4, height: 12, color: 0x4338ca, weapon: 'STAFF' },
+    STORM_LUX:    { name: 'Storm Caller', class: 'Mage', cost: 950, hp: 260, speed: 0.6, damage: 220, range: 400, cd: 120, mass: 1, radius: 4, height: 11, color: 0xfde047, weapon: 'STAFF' },
+    MAGE_BOSS:    { name: 'Arcane Boss', class: 'Mage', cost: 1200, hp: 1500, speed: 0.35, damage: 150, range: 300, cd: 70, mass: 3, radius: 6, height: 15, color: 0xa855f7, weapon: 'STAFF' },
+
+    // ASSASSIN
+    DAGGER_KATA:  { name: 'Dagger Storm', class: 'Assassin', cost: 750, hp: 300, speed: 1.4, damage: 70, range: 25, cd: 40, mass: 1, radius: 4, height: 11, color: 0x991b1b, weapon: 'DAGGER' },
+    INVIS_AKALI:  { name: 'Invis Ninja', class: 'Assassin', cost: 800, hp: 300, speed: 1.3, damage: 150, range: 20, cd: 60, mass: 1, radius: 4, height: 11, color: 0x14b8a6, weapon: 'DAGGER' },
+    SHADOW_ZED:   { name: 'Shadow Dash', class: 'Assassin', cost: 800, hp: 320, speed: 1.3, damage: 160, range: 20, cd: 60, mass: 1.2, radius: 4, height: 12, color: 0x111827, weapon: 'DAGGER' },
+    BLINK_KASS:   { name: 'Blink Asn', class: 'Assassin', cost: 850, hp: 280, speed: 1.0, damage: 170, range: 150, cd: 80, mass: 1, radius: 4, height: 12, color: 0x7e22ce, weapon: 'DAGGER' },
+
+    // SUPPORT
+    WIND_FAIRY:   { name: 'Wind Fairy', class: 'Support', cost: 700, hp: 260, speed: 1.0, damage: 30, range: 150, cd: 100, mass: 0.8, radius: 3.5, height: 11, color: 0xa3e635, weapon: 'STAFF' },
+    CHAIN_FATE:   { name: 'Chain Fate', class: 'Support', cost: 750, hp: 380, speed: 0.9, damage: 60, range: 200, cd: 150, mass: 1, radius: 4, height: 12, color: 0x0ea5e9, weapon: 'STAFF' },
+    CLONE_WUKONG: { name: 'Clone King', class: 'Support', cost: 850, hp: 450, speed: 1.1, damage: 110, range: 25, cd: 70, mass: 1.2, radius: 4, height: 12, color: 0xd97706, weapon: 'POLE' },
+
+    // TECH
+    SPRING_SLD:   { name: 'Spring Sld', class: 'Tech', cost: 500, hp: 420, speed: 1.2, damage: 90, range: 20, cd: 40, mass: 1.2, radius: 4, height: 12, color: 0xa3a3a3, weapon: 'NONE' },
+    MAGNET:       { name: 'Magnet Trp', class: 'Tech', cost: 650, hp: 500, speed: 0.7, damage: 80, range: 150, cd: 90, mass: 1.5, radius: 5, height: 13, color: 0x0284c7, weapon: 'MAGNET' },
+    DRONE_CTRL:   { name: 'Drone Ctrl', class: 'Tech', cost: 700, hp: 220, speed: 0.6, damage: 60, range: 200, cd: 20, mass: 1, radius: 4, height: 11, color: 0x06b6d4, weapon: 'REMOTE' },
+
+    // CHAOS
+    BANANA_KNT:   { name: 'Banana Knt', class: 'Chaos', cost: 400, hp: 400, speed: 0.7, damage: 40, range: 100, cd: 80, mass: 1.2, radius: 4, height: 12, color: 0xfacc15, weapon: 'BANANA' },
+    GAS_GUY:      { name: 'Laugh Gas', class: 'Chaos', cost: 550, hp: 350, speed: 0.8, damage: 20, range: 100, cd: 90, mass: 1, radius: 4, height: 12, color: 0x22c55e, weapon: 'NONE' },
+    HOOK_BLITZ:   { name: 'Hook Brawler', class: 'Chaos', cost: 750, hp: 700, speed: 0.7, damage: 180, range: 200, cd: 120, mass: 2.5, radius: 6, height: 15, color: 0xf59e0b, weapon: 'HOOK' }
+};
+
+const MAPS = [
+    { id: 'BRUISER', name: 'Colosseum Fracture', icon: '⚔', desc: 'Đấu trường nứt vỡ. Hố sâu ở giữa và Lực đẩy tăng 30%.' },
+    { id: 'TANK', name: 'Fortress Chokehold', icon: '⛨', desc: 'Hành lang hẹp. Cửa đá mở ra đóng lại nghiền nát lính.' },
+    { id: 'RANGED', name: 'Cliff of Ballistics', icon: '🎯', desc: 'Hai vách núi sâu thẳm. Gió tạt mạnh ảnh hưởng quỹ đạo bay.' },
+    { id: 'MAGE', name: 'Arcane Distortion', icon: '✧', desc: 'Các hòn đảo lơ lửng. Kỹ năng có tỉ lệ bay lệch hướng 20%.' },
+    { id: 'ASSASSIN', name: 'Shadow Labyrinth', icon: '🗡', desc: 'Mê cung tối tăm. Tốc độ Assassin tăng 40%.' },
+    { id: 'SUPPORT', name: 'Sanctuary Rings', icon: '✚', desc: 'Vòng hồi máu và tăng tốc ngẫu nhiên xuất hiện trên sân.' },
+    { id: 'TECH', name: 'Factory Overdrive', icon: '⚙', desc: 'Băng chuyền tự động di chuyển lính. Máy dập tử thần.' },
+    { id: 'CHAOS', name: 'Carnival of Madness', icon: '⚄', desc: 'Sự kiện ngẫu nhiên: Đảo ngược trọng lực, nổ mìn, bạt nhún!' }
+];
+
+// --- GLOBALS ---
+let state = 'LOBBY'; // LOBBY, SETUP, BATTLE, END
+let currentMap = null;
+let entities = []; let projectiles = []; let particles = []; let lightnings = []; let ghosts = []; let groundMarks = [];
+let walkableMeshes = []; let mapHazards = [];
+let teamBlueBudget = CONFIG.budget; let teamRedBudget = CONFIG.budget;
+let currentTab = 'Bruiser'; let selectedUnit = 'CLUBBER'; let isSandbox = false; let placeCooldown = 0;
+let initialArmySetup = []; let initialBlueBudget = CONFIG.budget; let initialRedBudget = CONFIG.budget;
+let hitStopFrames = 0; let mapTicks = 0;
+
+const keys = {}; 
+const mouse = { x: 0, y: 0, worldX: 0, worldY: 0, worldZ: 0, isLeftDown: false, isRightDown: false, isMidDown: false };
+let camDragData = { lastX: 0, lastY: 0, startX: 0, startY: 0, isDragging: false };
+
+const GameUtils = {
+    lerp: (a, b, t) => a + (b - a) * t, 
+    dist: (x1, y1, x2, y2) => Math.hypot(x2 - x1, y2 - y1), 
+    clamp: (val, min, max) => Math.max(min, Math.min(max, val))
+};
+
+// --- THREE.JS SETUP ---
+const container = document.getElementById('game-container');
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x060609); scene.fog = new THREE.FogExp2(0x060609, 0.001);
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 4000);
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" }); 
+renderer.setSize(window.innerWidth, window.innerHeight); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); 
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+container.appendChild(renderer.domElement);
+
+const renderScene = new THREE.RenderPass(scene, camera);
+const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+bloomPass.threshold = 0.3; bloomPass.strength = 0.6; bloomPass.radius = 0.5;
+const composer = new THREE.EffectComposer(renderer); composer.addPass(renderScene); composer.addPass(bloomPass);
+
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); scene.add(ambientLight); // Đã tăng từ 0.35 lên 0.8
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.2); // Đã tăng từ 0.7 lên 1.2
+dirLight.position.set(100, 300, 100); dirLight.castShadow = true;
+dirLight.shadow.mapSize.width = 1024; dirLight.shadow.mapSize.height = 1024; 
+dirLight.shadow.camera.near = 10; dirLight.shadow.camera.far = 1500;
+dirLight.shadow.camera.left = -1000; dirLight.shadow.camera.right = 1000;
+dirLight.shadow.camera.top = 1000; dirLight.shadow.camera.bottom = -1000;
+scene.add(dirLight);
+
+const geoCache = {
+    sphere: new THREE.SphereGeometry(1, 10, 10), cylinder: new THREE.CylinderGeometry(1, 1, 1, 8),
+    box: new THREE.BoxGeometry(1, 1, 1), cone: new THREE.ConeGeometry(1, 1, 8),
+    torus: new THREE.TorusGeometry(1, 0.2, 5, 10), circle: new THREE.CircleGeometry(1, 12)
+};
+const matCache = {};
+function getMaterial(color, emissive = 0x000000, metalness = 0.1, roughness = 0.7, opacity = 1.0) {
+    let key = color + "_" + emissive + "_" + opacity;
+    if(!matCache[key]) {
+        let mat = new THREE.MeshStandardMaterial({ color: color, roughness: roughness, metalness: metalness, emissive: emissive, emissiveIntensity: emissive ? 0.7 : 0 });
+        if(opacity < 1.0) { mat.transparent = true; mat.opacity = opacity; }
+        matCache[key] = mat;
+    }
+    return matCache[key];
+}
+
+const ghostMat = new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.4, transparent: true, wireframe: true });
+const ghostMesh = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 10, 8), ghostMat); scene.add(ghostMesh);
+
+const camCtrl = { targetX: 0, targetY: 0, targetZ: 0, radius: 800, theta: 0, phi: 1.0, shakeTrauma: 0 };
+function updateCameraPos() {
+    if ((mouse.isRightDown || mouse.isLeftDown && state !== 'SETUP') && camDragData.isDragging) {
+        camCtrl.theta -= (mouse.x - camDragData.lastX) * 0.005; camCtrl.phi -= (mouse.y - camDragData.lastY) * 0.005;
+        camDragData.lastX = mouse.x; camDragData.lastY = mouse.y;
+    }
+    if (mouse.isMidDown) {
+        let speed = camCtrl.radius * 0.002; let dx = mouse.x - camDragData.lastX; let dy = mouse.y - camDragData.lastY;
+        camCtrl.targetX -= (Math.cos(camCtrl.theta) * dx + Math.sin(camCtrl.theta) * dy) * speed;
+        camCtrl.targetZ -= (-Math.sin(camCtrl.theta) * dx + Math.cos(camCtrl.theta) * dy) * speed;
+        camDragData.lastX = mouse.x; camDragData.lastY = mouse.y;
+    }
+    let speed = camCtrl.radius * 0.02; let fwX = -Math.sin(camCtrl.theta), fwZ = -Math.cos(camCtrl.theta), rtX = Math.cos(camCtrl.theta), rtZ = -Math.sin(camCtrl.theta);
+    if(keys['w']) { camCtrl.targetX += fwX * speed; camCtrl.targetZ += fwZ * speed; }
+    if(keys['s']) { camCtrl.targetX -= fwX * speed; camCtrl.targetZ -= fwZ * speed; }
+    if(keys['a']) { camCtrl.targetX -= rtX * speed; camCtrl.targetZ -= rtZ * speed; }
+    if(keys['d']) { camCtrl.targetX += rtX * speed; camCtrl.targetZ += rtZ * speed; }
+    if(keys['q']) { camCtrl.radius = GameUtils.clamp(camCtrl.radius - speed*3, 40, 3000); }
+    if(keys['e']) { camCtrl.radius = GameUtils.clamp(camCtrl.radius + speed*3, 40, 3000); }
+    camCtrl.targetY = Math.max(0, camCtrl.targetY); camCtrl.phi = GameUtils.clamp(camCtrl.phi, 0.1, Math.PI/2 - 0.05);
+    
+    let cx = camCtrl.targetX + camCtrl.radius * Math.sin(camCtrl.phi) * Math.sin(camCtrl.theta);
+    let cy = camCtrl.targetY + camCtrl.radius * Math.cos(camCtrl.phi);
+    let cz = camCtrl.targetZ + camCtrl.radius * Math.sin(camCtrl.phi) * Math.cos(camCtrl.theta);
+
+    if (camCtrl.shakeTrauma > 0 && state !== 'END') {
+        let shake = camCtrl.shakeTrauma * camCtrl.shakeTrauma * 30; 
+        cx += (Math.random() - 0.5) * shake; cy += (Math.random() - 0.5) * shake; cz += (Math.random() - 0.5) * shake;
+        camCtrl.shakeTrauma = Math.max(0, camCtrl.shakeTrauma - 0.03); 
+    }
+    camera.position.lerp(new THREE.Vector3(cx, cy, cz), CONFIG.cameraSmooth);
+    camera.lookAt(new THREE.Vector3(camCtrl.targetX, camCtrl.targetY, camCtrl.targetZ));
+}
+function addShake(amt) { camCtrl.shakeTrauma = Math.min(camCtrl.shakeTrauma + amt, 1); }
+function triggerHitStop(frames) { if (hitStopFrames < frames) hitStopFrames = frames; }
+
+const raycaster = new THREE.Raycaster(); const mouseVec = new THREE.Vector2();
+function updateMouseWorld() {
+    mouseVec.x = (mouse.x / window.innerWidth) * 2 - 1; mouseVec.y = -(mouse.y / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouseVec, camera);
+    if(walkableMeshes.length === 0) return;
+    const intersects = raycaster.intersectObjects(walkableMeshes);
+    if (intersects.length > 0) { 
+        mouse.worldX = intersects[0].point.x; mouse.worldY = intersects[0].point.y; mouse.worldZ = intersects[0].point.z; 
+    }
+}
+
+// --- MAP ENGINE ---
+function clearMap() {
+    walkableMeshes.forEach(m => scene.remove(m)); walkableMeshes = [];
+    mapHazards.forEach(h => scene.remove(h.mesh)); mapHazards = [];
+    groundMarks.forEach(m => scene.remove(m.mesh)); groundMarks = [];
+    scene.fog.color.setHex(0x060609); scene.background.setHex(0x060609);
+    ambientLight.color.setHex(0xffffff); ambientLight.intensity = 0.8; // Cập nhật lại khi clear map
+    currentMap = null; mapTicks = 0; CONFIG.knockbackScale = 1.5;
+}
+
+function loadMap(mapId) {
+    clearMap();
+    currentMap = MAPS.find(m => m.id === mapId);
+    
+    // Default Grid
+    let grid = new THREE.GridHelper(CONFIG.worldSize, 100, 0x000000, 0x000000);
+    grid.material.opacity = 0.15; grid.material.transparent = true; grid.position.y = 0.1;
+    scene.add(grid); walkableMeshes.push(grid);
+
+    if (mapId === 'BRUISER') {
+        let floor = new THREE.Mesh(new THREE.CylinderGeometry(800, 800, 10, 32), getMaterial(0x2a1c15)); floor.position.y = -5; floor.receiveShadow = true; scene.add(floor); walkableMeshes.push(floor);
+        let pit = new THREE.Mesh(new THREE.CylinderGeometry(200, 200, 11, 32), getMaterial(0x000000)); pit.position.y = -5; scene.add(pit); 
+        CONFIG.knockbackScale = 2.0; 
+    } 
+    else if (mapId === 'TANK') {
+        let floor = new THREE.Mesh(new THREE.BoxGeometry(2000, 10, 2000), getMaterial(0x1a202c)); floor.position.y = -5; floor.receiveShadow = true; scene.add(floor); walkableMeshes.push(floor);
+        for(let z of [-300, 300]) {
+            let w1 = new THREE.Mesh(new THREE.BoxGeometry(800, 100, 50), getMaterial(0x334155)); w1.position.set(-600, 50, z); scene.add(w1); walkableMeshes.push(w1);
+            let w2 = new THREE.Mesh(new THREE.BoxGeometry(800, 100, 50), getMaterial(0x334155)); w2.position.set(600, 50, z); scene.add(w2); walkableMeshes.push(w2);
+            let door = new THREE.Mesh(new THREE.BoxGeometry(400, 100, 40), getMaterial(0x0f172a)); door.position.set(0, 50, z); scene.add(door); walkableMeshes.push(door);
+            mapHazards.push({ mesh: door, type: 'DOOR', z: z, timer: Math.random()*200 });
+        }
+    }
+    else if (mapId === 'RANGED') {
+        let cliffL = new THREE.Mesh(new THREE.BoxGeometry(1000, 200, 2000), getMaterial(0x1c1917)); cliffL.position.set(-700, 100, 0); cliffL.receiveShadow = true; scene.add(cliffL); walkableMeshes.push(cliffL);
+        let cliffR = new THREE.Mesh(new THREE.BoxGeometry(1000, 200, 2000), getMaterial(0x1c1917)); cliffR.position.set(700, 100, 0); cliffR.receiveShadow = true; scene.add(cliffR); walkableMeshes.push(cliffR);
+        let pit = new THREE.Mesh(new THREE.BoxGeometry(400, 10, 2000), getMaterial(0x050505)); pit.position.set(0, -200, 0); scene.add(pit); walkableMeshes.push(pit);
+    }
+    else if (mapId === 'MAGE') {
+        scene.background.setHex(0x1e1b4b); scene.fog.color.setHex(0x1e1b4b); ambientLight.color.setHex(0xa855f7);
+        for(let i=0; i<8; i++) {
+            let r = 150 + Math.random()*150;
+            let isl = new THREE.Mesh(new THREE.CylinderGeometry(r, r*0.5, 50, 16), getMaterial(0x2e1065));
+            isl.position.set((Math.random()-0.5)*1500, (Math.random()-0.5)*100, (Math.random()-0.5)*1500);
+            scene.add(isl); walkableMeshes.push(isl);
+        }
+    }
+    else if (mapId === 'ASSASSIN') {
+        scene.background.setHex(0x000000); scene.fog.color.setHex(0x000000); ambientLight.intensity = 0.4; // Tăng sáng sủa hơn cho map tối
+        let floor = new THREE.Mesh(new THREE.BoxGeometry(2000, 10, 2000), getMaterial(0x09090b)); floor.position.y = -5; scene.add(floor); walkableMeshes.push(floor);
+        for(let i=0; i<20; i++) {
+            let w = new THREE.Mesh(new THREE.BoxGeometry(Math.random()>0.5?400:50, 150, Math.random()>0.5?50:400), getMaterial(0x18181b));
+            w.position.set((Math.random()-0.5)*1600, 75, (Math.random()-0.5)*1600); scene.add(w); walkableMeshes.push(w);
+        }
+    }
+    else if (mapId === 'SUPPORT') {
+        let floor = new THREE.Mesh(new THREE.BoxGeometry(2000, 10, 2000), getMaterial(0x022c22)); floor.position.y = -5; scene.add(floor); walkableMeshes.push(floor);
+        for(let i=0; i<5; i++) {
+            let ring = new THREE.Mesh(geoCache.torus, getMaterial(0x10b981, 0x10b981, 0.1, 0.7, 0.5));
+            ring.scale.set(30, 30, 30); ring.rotation.x = Math.PI/2; ring.position.set((Math.random()-0.5)*1500, 2, (Math.random()-0.5)*1500);
+            scene.add(ring); mapHazards.push({mesh: ring, type: 'HEAL_RING'});
+        }
+    }
+    else if (mapId === 'TECH') {
+        let floor = new THREE.Mesh(new THREE.BoxGeometry(2000, 10, 2000), getMaterial(0x27272a)); floor.position.y = -5; scene.add(floor); walkableMeshes.push(floor);
+        for(let i=0; i<4; i++) {
+            let conv = new THREE.Mesh(new THREE.BoxGeometry(300, 12, 1000), getMaterial(0xf59e0b)); conv.position.set((i-1.5)*400, -4, 0);
+            scene.add(conv); walkableMeshes.push(conv); mapHazards.push({mesh: conv, type: 'CONVEYOR', dir: i%2===0?1:-1});
+        }
+    }
+    else if (mapId === 'CHAOS') {
+        let floor = new THREE.Mesh(new THREE.BoxGeometry(2000, 10, 2000), getMaterial(0x4c1d95)); floor.position.y = -5; scene.add(floor); walkableMeshes.push(floor);
+        for(let i=0; i<8; i++) {
+            let pad = new THREE.Mesh(new THREE.CylinderGeometry(40, 40, 20), getMaterial(0xec4899));
+            pad.position.set((Math.random()-0.5)*1500, 10, (Math.random()-0.5)*1500);
+            scene.add(pad); walkableMeshes.push(pad); mapHazards.push({mesh: pad, type: 'JUMP_PAD'});
+        }
+    }
+    else {
+        let groundMatDef = getMaterial(0x151520, 0, 0.0, 0.9);
+        let floor = new THREE.Mesh(groundGeo, groundMatDef); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor); walkableMeshes.push(floor);
+    }
+}
+
+function getGroundHeight(x, z) {
+    if (!currentMap) return 0;
+    let id = currentMap.id;
+    if (id === 'BRUISER') { return Math.hypot(x, z) < 200 ? -1000 : 0; }
+    if (id === 'RANGED') { if (x < -200) return 200; if (x > 200) return 200; return -1000; }
+    if (id === 'MAGE') {
+        for(let m of walkableMeshes) {
+            if(m.geometry.type==='CylinderGeometry' && Math.hypot(x-m.position.x, z-m.position.z) < m.geometry.parameters.radiusTop) return m.position.y + 25;
+        }
+        return -1000;
+    }
+    return 0;
+}
+
+function updateMapMechanics() {
+    if (!currentMap || state !== 'BATTLE') return;
+    mapTicks++;
+    let id = currentMap.id;
+
+    if (id === 'TANK') {
+        mapHazards.forEach(h => {
+            h.timer++; h.mesh.position.x = Math.sin(h.timer * 0.02) * 200;
+            entities.forEach(e => { if(!e.isDead && Math.abs(e.z - h.z) < 30 && Math.abs(e.x - h.mesh.position.x) < 220) { e.takeDamage(50, 0,0,0); spawnParticles(e.x, e.y+10, e.z, 0x94a3b8, 'smoke', 3); } });
+        });
+    }
+    else if (id === 'SUPPORT' && mapTicks % 30 === 0) {
+        mapHazards.forEach(h => {
+            h.mesh.rotation.z += 0.1;
+            entities.forEach(e => { if(!e.isDead && Math.hypot(e.x-h.mesh.position.x, e.z-h.mesh.position.z) < 150) { e.hp = Math.min(e.maxHp, e.hp+20); spawnParticles(e.x, e.y+5, e.z, 0x10b981, 'glow', 1); } });
+        });
+    }
+    else if (id === 'TECH') {
+        mapHazards.forEach(h => {
+            if(h.type === 'CONVEYOR') {
+                entities.forEach(e => { if(!e.isDead && Math.abs(e.x-h.mesh.position.x) < 150 && e.y < 10) e.vz += h.dir * 0.5; });
+            }
+        });
+    }
+    else if (id === 'CHAOS' && mapTicks % 300 === 0) {
+        let r = Math.random();
+        if (r < 0.3) { addShake(2.0); entities.forEach(e => { if(!e.isDead) e.vy += 20; }); } 
+        else if (r < 0.6) { explode((Math.random()-0.5)*1000, (Math.random()-0.5)*1000, 200, 100, 'none', true); } 
+    }
+    
+    if (id === 'CHAOS') {
+        mapHazards.forEach(h => {
+            entities.forEach(e => { if(!e.isDead && Math.hypot(e.x-h.mesh.position.x, e.z-h.mesh.position.z) < 40 && e.y < h.mesh.position.y+15) { e.vy = 40; e.takeDamage(10,0,0,0); } });
+        });
+    }
+}
+
+// --- OPTIMIZED EFFECTS SYSTEM ---
+function spawnGroundMark(x, z, size, colorHex, isCrater) {
+    if(groundMarks.length >= CONFIG.maxMarks) { scene.remove(groundMarks[0].mesh); groundMarks.shift(); }
+    let mat = new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: isCrater ? 0.8 : 0.5, depthWrite: false });
+    let mesh = new THREE.Mesh(geoCache.circle, mat);
+    mesh.rotation.x = -Math.PI / 2; mesh.position.set(x, getGroundHeight(x,z) + 0.1 + Math.random()*0.05, z);
+    mesh.scale.set(size, size * (isCrater ? (0.8 + Math.random()*0.4) : 1), 1); mesh.rotation.z = Math.random() * Math.PI * 2;
+    scene.add(mesh); groundMarks.push({ mesh: mesh, life: 1.0 });
+}
+
+function spawnGhost(unit) {
+    if(ghosts.length >= CONFIG.maxGhosts) { scene.remove(ghosts[0].mesh); ghosts.shift(); }
+    let ghost = unit.mesh.clone();
+    let color = unit.typeId === 'NINJA' || unit.typeId === 'SHADOW_ZED' ? 0x222222 : (unit.team === 'blue' ? 0x3b82f6 : 0xef4444);
+    let mat = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.4, depthWrite: false, blending: color === 0x222222 ? THREE.NormalBlending : THREE.AdditiveBlending });
+    ghost.traverse(c => { if(c.isMesh) c.material = mat; });
+    scene.add(ghost); ghosts.push({mesh: ghost, life: 0.5});
+}
+
+function updateGhosts() {
+    for (let i = ghosts.length - 1; i >= 0; i--) {
+        let g = ghosts[i]; g.life -= 0.05;
+        g.mesh.traverse(c => { if(c.isMesh && c.material) c.material.opacity = g.life; });
+        g.mesh.scale.multiplyScalar(1.02);
+        if (g.life <= 0) { scene.remove(g.mesh); ghosts.splice(i, 1); }
+    }
+}
+
+class Particle {
+    constructor(x, y, z, colorHex, type) {
+        let mat = new THREE.MeshBasicMaterial({color: colorHex, transparent: true, opacity: 1});
+        if (type === 'fire' || type === 'glow' || type === 'trail' || type === 'beam') { mat.blending = THREE.AdditiveBlending; mat.depthWrite = false; }
+        this.mesh = new THREE.Mesh(geoCache.box, mat); this.mesh.position.set(x, y, z);
+        this.type = type; this.vx = (Math.random() - 0.5) * 4; this.vy = Math.random() * 4 + 2; this.vz = (Math.random() - 0.5) * 4;
+        this.life = 1.0; this.decay = Math.random() * 0.03 + 0.02; this.growth = 1.02;
+        if (type === 'smoke') { this.vy = Math.random()*2; this.decay = 0.02; this.mesh.scale.set(3,3,3); }
+        if (type === 'dust') { this.vy = Math.random()*1; this.decay = 0.015; this.mesh.scale.set(4,4,4); this.vx*=2; this.vz*=2; }
+        if (type === 'fire') { this.vy = Math.random()*3+2; this.decay = 0.05; this.mesh.scale.set(1.5,1.5,1.5); this.vx*=0.5; this.vz*=0.5;}
+        if (type === 'trail') { this.vx*=0.1; this.vy*=0.1; this.vz*=0.1; this.decay = 0.1; this.mesh.scale.set(1.5,1.5,1.5); }
+        scene.add(this.mesh);
+    }
+    update() {
+        this.mesh.position.x += this.vx; this.mesh.position.y += this.vy; this.mesh.position.z += this.vz;
+        if(this.type === 'blood') { this.vy -= CONFIG.gravity * 0.2; } else { this.vy *= 0.9; this.vx *= 0.9; this.vz *= 0.9; this.mesh.scale.multiplyScalar(this.growth); }
+        this.life -= this.decay; this.mesh.material.opacity = this.life;
+        return this.life <= 0;
+    }
+}
+function spawnParticles(x, y, z, color, type, count) {
+    for(let i=0; i<count; i++) {
+        if(particles.length >= CONFIG.maxParticles) { scene.remove(particles[0].mesh); particles.shift(); }
+        particles.push(new Particle(x, y, z, color, type));
+    }
+}
+
+// --- MODELS BUILDER ---
+function attachWeapon(armRGroup, armLGroup, weaponType, R, H, woodMat, metalMat, darkMat, extraColMat) {
+    let wGrp = new THREE.Group();
+    switch(weaponType) {
+        case 'CLUB': case 'BIG_CLUB':
+            let handle = new THREE.Mesh(geoCache.cylinder, woodMat); handle.scale.set(R*0.2, R*2.5, R*0.2); handle.position.y = R*1.2;
+            let top1 = new THREE.Mesh(geoCache.sphere, woodMat); top1.scale.set(R*0.6, R*0.8, R*0.6); top1.position.y = R*2.5;
+            let top2 = new THREE.Mesh(geoCache.sphere, woodMat); top2.scale.set(R*0.5, R*0.6, R*0.5); top2.position.set(R*0.2, R*2.8, R*0.2);
+            if(weaponType === 'BIG_CLUB') { handle.scale.set(R*0.4, R*4, R*0.4); top1.scale.set(R*1.2, R*1.6, R*1.2); top2.scale.set(R, R*1.2, R); }
+            wGrp.add(handle, top1, top2); wGrp.position.set(0, -H*0.25, 0); wGrp.rotation.x = Math.PI/2; armRGroup.add(wGrp); break;
+        case 'POLE':
+            let pole = new THREE.Mesh(geoCache.cylinder, woodMat); pole.scale.set(R*0.15, R*12, R*0.15); let tip = new THREE.Mesh(geoCache.cone, metalMat); tip.scale.set(R*0.4, R*2.5, R*0.4); tip.position.y = R*6; pole.add(tip); pole.position.set(0, 0, R*3); pole.rotation.x = Math.PI/2; armRGroup.add(pole); break;
+        case 'AXE':
+            let axeh = new THREE.Mesh(geoCache.cylinder, woodMat); axeh.scale.set(R*0.2, R*5, R*0.2); let blade = new THREE.Mesh(geoCache.box, metalMat); blade.scale.set(R*0.1, R*1.5, R*1.5); blade.position.set(0, R*2, R*0.8); wGrp.add(axeh, blade); wGrp.position.set(0, 0, R*2); wGrp.rotation.x = Math.PI/2; armRGroup.add(wGrp); break;
+        case 'SWORD': case 'SWORD_SHIELD':
+            let sword = new THREE.Mesh(geoCache.box, metalMat); sword.scale.set(R*0.2, R*4, R*0.5); sword.position.set(0, -H*0.25, R*1.5); sword.rotation.x = Math.PI/2; armRGroup.add(sword);
+            if(weaponType === 'SWORD_SHIELD') { let shield = new THREE.Mesh(geoCache.box, metalMat); shield.scale.set(R*2.5, R*4, R*0.3); shield.position.set(0, -H*0.1, R*0.8); armLGroup.add(shield); } break;
+        case 'DAGGER':
+            let dagger = new THREE.Mesh(geoCache.cone, metalMat); dagger.scale.set(R*0.3, R*2, R*0.1); dagger.position.set(0, -H*0.25, R); dagger.rotation.x = Math.PI/2; armRGroup.add(dagger); break;
+        case 'STAFF':
+            let staff = new THREE.Mesh(geoCache.cylinder, woodMat); staff.scale.set(R*0.2, R*5, R*0.2); let gem = new THREE.Mesh(geoCache.sphere, extraColMat); gem.scale.set(R*0.8, R*0.8, R*0.8); gem.position.y = R*2.5; wGrp.add(staff, gem); wGrp.position.set(0, -H*0.25, R*1.5); wGrp.rotation.x = Math.PI/3; armRGroup.add(wGrp); break;
+        case 'BOW':
+            let bowGrp = new THREE.Group(); let bowTop = new THREE.Mesh(geoCache.cylinder, woodMat); bowTop.scale.set(0.15, R*2.5, 0.15); bowTop.position.set(0, R*1.2, R*0.4); bowTop.rotation.x = -Math.PI/10; let bowBot = new THREE.Mesh(geoCache.cylinder, woodMat); bowBot.scale.set(0.15, R*2.5, 0.15); bowBot.position.set(0, -R*1.2, R*0.4); bowBot.rotation.x = Math.PI/10; let handle2 = new THREE.Mesh(geoCache.cylinder, darkMat); handle2.scale.set(0.2, R*0.8, 0.2); handle2.position.set(0, 0, R*0.2); let string = new THREE.Mesh(geoCache.cylinder, getMaterial(0xffffff)); string.scale.set(0.05, R*4.8, 0.05); string.position.set(0, 0, -R*0.2); bowGrp.add(bowTop, bowBot, handle2, string); bowGrp.position.set(0, -H*0.1, R*0.8); armLGroup.add(bowGrp); let arrowGrp = new THREE.Group(); let arrowShaft = new THREE.Mesh(geoCache.cylinder, woodMat); arrowShaft.scale.set(R*0.1, R*3.5, R*0.1); let arrowHead = new THREE.Mesh(geoCache.cone, metalMat); arrowHead.scale.set(R*0.3, R*0.5, R*0.3); arrowHead.position.y = R*1.8; arrowGrp.add(arrowShaft, arrowHead); arrowGrp.position.set(0, -H*0.1, R*0.8); arrowGrp.rotation.x = Math.PI/2; armRGroup.add(arrowGrp); break;
+        case 'GUN': case 'ROCKET':
+            let gun = new THREE.Mesh(geoCache.cylinder, darkMat); gun.scale.set(R*0.3, R*4, R*0.3); gun.rotation.x = Math.PI/2; gun.position.set(0, -H*0.1, R*1.5);
+            if(weaponType === 'ROCKET') { gun.scale.set(R*0.8, R*5, R*0.8); let front = new THREE.Mesh(geoCache.cone, extraColMat); front.scale.set(R*0.9, R, R*0.9); front.position.y = R*2.5; gun.add(front); } armRGroup.add(gun); break;
+        case 'BOOMERANG':
+            let boom = new THREE.Mesh(geoCache.box, woodMat); boom.scale.set(R*2, R*0.2, R*0.5); boom.position.set(0, -H*0.25, R); armRGroup.add(boom); break;
+        case 'MAGNET':
+            let mag = new THREE.Mesh(geoCache.torus, extraColMat); mag.scale.set(R*0.8, R*0.8, R*0.8); mag.position.set(0, -H*0.25, R); mag.rotation.x = Math.PI/2; armRGroup.add(mag); break;
+        case 'HOOK':
+            let hk = new THREE.Mesh(geoCache.torus, metalMat); hk.scale.set(R*0.5, R*0.5, R*0.5); hk.position.set(0, -H*0.25, R); armRGroup.add(hk); break;
+        case 'ANCHOR':
+            let anc = new THREE.Mesh(geoCache.cylinder, metalMat); anc.scale.set(R*0.2, R*6, R*0.2); let hook1 = new THREE.Mesh(geoCache.torus, darkMat); hook1.scale.set(R, R, R); hook1.position.y = R*3; anc.add(hook1); anc.position.set(0,0,R*2); anc.rotation.x=Math.PI/2; armRGroup.add(anc); break;
+        case 'BANANA':
+            let bn = new THREE.Mesh(geoCache.box, extraColMat); bn.scale.set(R, R*0.2, R*0.2); bn.position.set(0, -H*0.25, R); armRGroup.add(bn); break;
+        case 'FIST':
+            let fistL = new THREE.Mesh(geoCache.sphere, extraColMat); fistL.scale.set(R, R, R); fistL.position.y = -H*0.3; armLGroup.add(fistL); let fistR = new THREE.Mesh(geoCache.sphere, extraColMat); fistR.scale.set(R, R, R); fistR.position.y = -H*0.3; armRGroup.add(fistR); break;
+        case 'REMOTE':
+            let rem = new THREE.Mesh(geoCache.box, darkMat); rem.scale.set(R*0.8, R*0.8, R*0.2); rem.position.set(0, -H*0.25, R); armRGroup.add(rem); break;
+        case 'BOMB':
+            let bomb = new THREE.Mesh(geoCache.sphere, darkMat); bomb.scale.set(R*1.6, R*1.6, R*1.6); bomb.position.set(0, 0, R*1.2); let fuse = new THREE.Mesh(geoCache.cylinder, getMaterial(0x9ca3af)); fuse.scale.set(R*0.15, R*0.6, R*0.15); fuse.position.y = R*1.6; bomb.add(fuse); let spark = new THREE.Mesh(geoCache.sphere, getMaterial(0xf97316, 0xf97316)); spark.scale.set(R*0.4, R*0.4, R*0.4); spark.position.y = R*0.3; fuse.add(spark); wGrp.add(bomb); armRGroup.rotation.set(-Math.PI/4, 0, Math.PI/4); armLGroup.rotation.set(-Math.PI/4, 0, -Math.PI/4); armRGroup.add(wGrp); break;
+    }
+}
+
+function createUnitMesh(team, typeId, isClone = false) {
+    const data = UNIT_TYPES[typeId]; const unitGroup = new THREE.Group();
+    const teamColor = team === 'blue' ? 0x3b82f6 : 0xef4444;
+    const teamMat = getMaterial(teamColor, 0, 0.1, 0.8); const secMat = getMaterial(data.color, 0, 0.1, 0.8);
+    const skinMat = getMaterial(0xffe4b5, 0, 0.1, 0.6); const metalMat = getMaterial(0xe2e8f0, 0, 0.7, 0.3);
+    const woodMat = getMaterial(0x5c2b07, 0, 0.1, 0.9); const darkMat = getMaterial(0x111827, 0, 0.1, 0.8);
+    const extraColMat = getMaterial(data.color, data.color);
+
+    let R = data.radius; let H = data.height;
+
+    const legLGroup = new THREE.Group(); legLGroup.position.set(-R*0.6, H*0.35, 0); unitGroup.add(legLGroup); unitGroup.legL = legLGroup;
+    const legRGroup = new THREE.Group(); legRGroup.position.set(R*0.6, H*0.35, 0); unitGroup.add(legRGroup); unitGroup.legR = legRGroup;
+    let footL = new THREE.Mesh(geoCache.sphere, darkMat); footL.scale.set(R*0.55, R*0.4, R*0.7); footL.position.set(0, -H*0.3, R*0.1); footL.castShadow = true; legLGroup.add(footL);
+    let footR = new THREE.Mesh(geoCache.sphere, darkMat); footR.scale.set(R*0.55, R*0.4, R*0.7); footR.position.set(0, -H*0.3, R*0.1); footR.castShadow = true; legRGroup.add(footR);
+
+    const upperBody = new THREE.Group(); upperBody.position.y = H * 0.35; unitGroup.add(upperBody); unitGroup.upperBody = upperBody;
+
+    let torsoGeo = (typeId.includes('TANK') || typeId.includes('GIANT') || typeId.includes('STONE') || typeId.includes('ELASTIC') || typeId === 'RAGE_SETT') ? geoCache.box : geoCache.sphere;
+    let torso = new THREE.Mesh(torsoGeo, secMat.clone());
+    if(torsoGeo === geoCache.box) { torso.scale.set(R*2.5, H*0.5, R*1.5); torso.position.y = H * 0.25; } 
+    else if (typeId.includes('MAGE') || typeId.includes('FAIRY') || typeId.includes('FATE')) { torso.geometry = geoCache.cone; torso.scale.set(R*2.2, H*0.8, R*2.2); torso.position.y = H * 0.15; } 
+    else { torso.scale.set(R*1.6, H*0.45, R*1.4); torso.position.y = H * 0.2; }
+    torso.castShadow = true; upperBody.add(torso); unitGroup.torsoRef = torso;
+
+    const headGroup = new THREE.Group(); headGroup.position.y = H * 0.5 + R * 0.3; upperBody.add(headGroup); unitGroup.headGroup = headGroup;
+    let headRadius = R * 0.9; let head = new THREE.Mesh(geoCache.sphere, teamMat); head.scale.set(headRadius, headRadius, headRadius); head.castShadow = true; headGroup.add(head); unitGroup.headRef = head;
+
+    const eyeGroup = new THREE.Group(); const eyeMat = new THREE.MeshBasicMaterial({color: 0xffffff}); const pupilMat = new THREE.MeshBasicMaterial({color: 0x000000});
+    let eyeS = headRadius * 0.35; let eyeL = new THREE.Mesh(geoCache.sphere, eyeMat); eyeL.scale.set(eyeS, eyeS, eyeS); eyeL.position.set(-headRadius*0.35, headRadius*0.1, headRadius*0.8); let eyeR = new THREE.Mesh(geoCache.sphere, eyeMat); eyeR.scale.set(eyeS, eyeS, eyeS); eyeR.position.set(headRadius*0.35, headRadius*0.1, headRadius*0.8);
+    let pupS = eyeS * 0.4; let pupL = new THREE.Mesh(geoCache.sphere, pupilMat); pupL.scale.set(pupS, pupS, pupS); pupL.position.z = eyeS * 0.8; pupL.name = "pupil"; let pupR = new THREE.Mesh(geoCache.sphere, pupilMat); pupR.scale.set(pupS, pupS, pupS); pupR.position.z = eyeS * 0.8; pupR.name = "pupil";
+    eyeL.add(pupL); eyeR.add(pupR); eyeGroup.add(eyeL, eyeR); headGroup.add(eyeGroup); unitGroup.eyeRef = eyeGroup; 
+
+    const deadEyes = new THREE.Group(); const xMat = new THREE.MeshBasicMaterial({color: 0x000000}); const w = 0.15 * headRadius/0.95, l = 0.7 * headRadius/0.95;
+    let el = new THREE.Group(); let b1 = new THREE.Mesh(geoCache.box, xMat); b1.scale.set(w, l, w); b1.rotation.z = Math.PI/4; let b2 = new THREE.Mesh(geoCache.box, xMat); b2.scale.set(w, l, w); b2.rotation.z = -Math.PI/4; el.add(b1, b2); el.position.set(-0.4 * headRadius/0.95, 0.1 * headRadius/0.95, 0.9 * headRadius/0.95);
+    let er = new THREE.Group(); let b3 = new THREE.Mesh(geoCache.box, xMat); b3.scale.set(w, l, w); b3.rotation.z = Math.PI/4; let b4 = new THREE.Mesh(geoCache.box, xMat); b4.scale.set(w, l, w); b4.rotation.z = -Math.PI/4; er.add(b3, b4); er.position.set(0.4 * headRadius/0.95, 0.1 * headRadius/0.95, 0.9 * headRadius/0.95);
+    deadEyes.add(el, er); deadEyes.visible = false; headGroup.add(deadEyes); unitGroup.deadEyeRef = deadEyes;
+
+    const armLGroup = new THREE.Group(); armLGroup.position.set(-R*1.6, H*0.4, 0); upperBody.add(armLGroup); unitGroup.armL = armLGroup;
+    const armRGroup = new THREE.Group(); armRGroup.position.set(R*1.6, H*0.4, 0); upperBody.add(armRGroup); unitGroup.armR = armRGroup;
+    let armS = R * 0.45; let handL = new THREE.Mesh(geoCache.sphere, skinMat); handL.scale.set(armS, armS, armS); handL.position.y = -H*0.25; handL.castShadow = true; armLGroup.add(handL); unitGroup.handL = handL;
+    let handR = new THREE.Mesh(geoCache.sphere, skinMat); handR.scale.set(armS, armS, armS); handR.position.y = -H*0.25; handR.castShadow = true; armRGroup.add(handR); unitGroup.handR = handR;
+
+    if (data.weapon && data.weapon !== 'NONE') attachWeapon(armRGroup, armLGroup, data.weapon, R, H, woodMat, metalMat, darkMat, extraColMat);
+    
+    if (typeId.includes('MAGE') || typeId.includes('FAIRY') || typeId.includes('FATE')) { let hatTop = new THREE.Mesh(geoCache.cone, secMat); hatTop.scale.set(headRadius*1.4, headRadius*2.5, headRadius*1.4); hatTop.position.y = headRadius*1.6; headGroup.add(hatTop); }
+    if (typeId.includes('NINJA') || typeId.includes('AKALI') || typeId === 'SHADOW_ZED') { let rb = new THREE.Mesh(geoCache.box, getMaterial(0x111111)); rb.scale.set(R*2.1, R*0.5, R*2.1); headGroup.add(rb); }
+    if (typeId === 'ROCKET_GIRL' || typeId === 'SNIPER_CAIT') { let hair = new THREE.Mesh(geoCache.cylinder, getMaterial(0xdb2777)); hair.scale.set(R*0.5, R*3, R*0.5); hair.position.set(0, 0, -R); hair.rotation.x = Math.PI/4; headGroup.add(hair); }
+
+    if (isClone) { unitGroup.traverse(c => { if(c.isMesh && c.material) { c.material = c.material.clone(); c.material.transparent = true; c.material.opacity = 0.5; } }); }
+
+    unitGroup.allMeshes = [];
+    unitGroup.traverse(c => { if(c.isMesh && c.material && c.material.color) { unitGroup.allMeshes.push(c); c.userData.origEmissive = c.material.emissive ? c.material.emissive.clone() : new THREE.Color(0); }});
+    return unitGroup;
+}
+
+// --- GAME CLASSES ---
+class Unit {
+    constructor(x, y, z, team, typeId, isClone = false) {
+        this.typeStr = 'unit'; this.team = team; this.typeId = typeId; this.unitType = UNIT_TYPES[typeId];
+        this.x = x; this.y = y; this.z = z; this.vx = 0; this.vy = 0; this.vz = 0;
+        this.hp = isClone ? this.unitType.hp * 0.5 : this.unitType.hp; this.maxHp = this.unitType.hp;
+        this.mass = this.unitType.mass; this.radius = this.unitType.radius;
+        this.isDead = false; this.fsm = 'SEEK'; this.target = null;
+        this.timer = 0; this.attackTimer = 0; this.sqX = 1; this.sqY = 1; this.wobble = Math.random() * 10;
+        this.fallDir = Math.random() > 0.5 ? 1 : -1; this.attackCount = 0; this.ticks = 0;
+        this.isClone = isClone;
+        
+        this.isStealth = false; this.stealthTimer = 0;
+        this.status = { freeze: 0, fire: 0, poly: 0, confuse: 0, rage: 0, stun: 0, freezeStack: 0, invul: 0, levitate: 0 };
+        this.sheepMesh = null; this.hoverOffset = Math.random() * Math.PI * 2;
+        this.spinX = 0; this.spinY = 0; this.spinZ = 0; this.rotX = 0; this.rotY = 0; this.rotZ = 0;
+        
+        this.damageFlashTimer = 0; this.novaCooldown = 0;
+        this.mesh = createUnitMesh(team, typeId, isClone); this.mesh.position.set(x, y, z); scene.add(this.mesh);
+
+        const barW = this.radius * 2.5; const barH = this.radius * 0.4;
+        const bgBar = new THREE.Mesh(new THREE.PlaneGeometry(barW + 0.4, barH + 0.4), new THREE.MeshBasicMaterial({color: 0x111111, depthWrite: false}));
+        const fgGeo = new THREE.PlaneGeometry(barW, barH); fgGeo.translate(barW/2, 0, 0); 
+        const fgBar = new THREE.Mesh(fgGeo, new THREE.MeshBasicMaterial({color: team==='blue'?0x3b82f6:0xef4444, depthWrite: false})); fgBar.position.set(-barW/2, 0, 0.1);
+        this.healthBarGroup = new THREE.Group(); this.healthBarGroup.add(bgBar, fgBar);
+        this.healthBarGroup.position.set(x, this.unitType.height + this.radius + 3, z);
+        scene.add(this.healthBarGroup); this.healthBarFg = fgBar;
+    }
+
+    takeDamage(amount, fX, fY, fZ) {
+        if (this.isDead || this.status.invul > 0) return;
+        
+        if (this.typeId === 'STONE_MALPH') amount *= 0.6;
+        if (this.typeId.includes('TANK')) { let dr = this.hp / this.maxHp; if (dr < 0.4) dr = 0.4; amount *= dr; this.sqX = 1 + (1-dr)*0.5; this.sqY = 1 + (1-dr)*0.5; }
+        if (this.typeId === 'ROLLING_RAM' && this.fsm === 'SEEK') { amount *= 0.7; } 
+
+        if (this.typeId === 'SHADOW_ZED' && amount > 100 && this.clone && !this.clone.isDead) {
+            let tx = this.x, tz = this.z; this.x = this.clone.x; this.z = this.clone.z; this.clone.x = tx; this.clone.z = tz;
+            spawnParticles(this.x, 10, this.z, 0x111827, 'smoke', 10); spawnParticles(this.clone.x, 10, this.clone.z, 0x111827, 'smoke', 10);
+        }
+
+        this.hp -= amount; this.damageFlashTimer = 3;
+        spawnParticles(this.x, this.y + this.unitType.height/2, this.z, 0x990000, 'blood', Math.min(10, amount/5));
+        
+        this.vx += (fX / this.mass) * CONFIG.knockbackScale; this.vy += (fY / this.mass) * CONFIG.knockbackScale; this.vz += (fZ / this.mass) * CONFIG.knockbackScale;
+        if (this.typeId !== 'TANK' && !this.typeId.includes('STONE') && this.fsm !== 'JUMP_SLAM' && this.fsm !== 'EXECUTE_SPIN') { this.y += 0.5; this.sqX = 1.3; this.sqY = 0.7; }
+
+        if (this.hp <= 0) {
+            this.isDead = true; this.fsm = 'DEAD'; this.vy += 2;
+            this.spinX = (Math.random() - 0.5) * 0.5; this.spinY = (Math.random() - 0.5) * 0.5; this.spinZ = (Math.random() - 0.5) * 0.5;
+            this.mesh.eyeRef.visible = false; this.mesh.deadEyeRef.visible = true;
+            this.mesh.traverse((c) => { if (c.isMesh && c.material && c.material.color && !this.mesh.deadEyeRef.children.includes(c)) c.material = getMaterial(0x334155); });
+            spawnGroundMark(this.x, this.z, this.radius, 0x550000, false); 
+            if(this.mass > 5) addShake(0.5);
+            
+            if(this.typeId === 'BOMBER') explode(this.x, this.z, 50, this.unitType.damage * 2, this.team, true);
+            if(this.typeId === 'ELASTIC_ZAC' && !this.isClone) {
+                for(let i=0; i<3; i++) { let slime = new Unit(this.x + (Math.random()-0.5)*10, this.y, this.z + (Math.random()-0.5)*10, this.team, 'CLUBBER', true); slime.mesh.torsoRef.material.color.setHex(0x16a34a); entities.push(slime); }
+            }
+            if(this.drones) this.drones.forEach(d => { d.m.position.y = 0; d.m.rotation.z = Math.PI/2; });
+        } else if (amount > 20 && this.mass < 5 && !['JUMP_SLAM','SPIN','BERSERK_SPIN','EXECUTE_SPIN','DAGGER_SPIN'].includes(this.fsm)) { this.fsm = 'STAGGER'; this.timer = 15; }
+    }
+
+    update() {
+        this.ticks++;
+        if (this.novaCooldown > 0) this.novaCooldown--; 
+
+        if (this.status.invul > 0) this.status.invul--;
+        if (this.typeId === 'GRAVITY_MAGE' && this.ticks % 10 === 0 && !this.isDead) {
+            for(let e of entities) { if(e.team !== this.team && !e.isDead && Math.hypot(e.x-this.x, e.z-this.z) < 50) { e.vy += 1; e.vx *= 0.8; e.vz *= 0.8; } }
+        }
+        if (this.typeId === 'WIND_FAIRY' && this.ticks % 10 === 0 && !this.isDead) {
+            for(let e of entities) { if(e.team !== this.team && !e.isDead && Math.hypot(e.x-this.x, e.z-this.z) < 50) { let a = Math.atan2(e.z-this.z, e.x-this.x); e.vx += Math.cos(a)*2; e.vz += Math.sin(a)*2; } }
+        }
+        if (this.typeId === 'ICE_LISS' && this.ticks % 30 === 0 && !this.isDead) {
+            for(let e of entities) { 
+                if(e.team !== this.team && !e.isDead && Math.hypot(e.x-this.x, e.z-this.z) < 30) { e.status.freezeStack++; e.vx *= 0.6; e.vz *= 0.6; spawnParticles(e.x, e.y, e.z, 0x38bdf8, 'smoke', 1); if(e.status.freezeStack >= 3) { e.status.freeze = 100; e.status.freezeStack = 0; } } 
+            }
+            if (this.hp < this.maxHp * 0.4 && this.status.freeze <= 0) { this.status.freeze = 120; this.status.invul = 120; this.hp = Math.min(this.maxHp, this.hp+200); spawnParticles(this.x, 10, this.z, 0x60a5fa, 'glow', 20); }
+        }
+        if (this.typeId === 'MAGNET' && this.ticks % 10 === 0 && !this.isDead) {
+            for(let e of entities) { if(e.team !== this.team && !e.isDead && ['SWORD','AXE','POLE','DAGGER','SWORD_SHIELD'].includes(e.unitType.weapon) && Math.hypot(e.x-this.x, e.z-this.z) < 60) { let a = Math.atan2(this.z-e.z, this.x-e.x); e.vx += Math.cos(a)*1.5; e.vz += Math.sin(a)*1.5; } }
+        }
+        if (this.typeId === 'GAS_GUY' && this.ticks % 15 === 0 && !this.isDead) {
+            for(let e of entities) { if(e.team !== this.team && !e.isDead && Math.hypot(e.x-this.x, e.z-this.z) < 50) { e.status.confuse = 60; spawnParticles(e.x, e.y+10, e.z, 0x22c55e, 'smoke', 1); } }
+        }
+        if (this.typeId === 'DRONE_CTRL' && !this.isDead) {
+            if (!this.drones) { this.drones = []; for(let i=0;i<3;i++) { let d = new THREE.Mesh(geoCache.box, getMaterial(0x06b6d4, 0x06b6d4)); d.scale.set(1.5,1.5,1.5); scene.add(d); this.drones.push({m:d, a:i*Math.PI*2/3}); } }
+            this.drones.forEach(d => { d.a += 0.1; d.m.position.set(this.x + Math.cos(d.a)*20, this.y+20, this.z + Math.sin(d.a)*20); if(Math.random()<0.02 && this.target && !this.target.isDead) createProjectile(d.m.position.x, d.m.position.y, d.m.position.z, this.target, this.unitType.damage*0.2, this.team, 'BEAM'); });
+        }
+        if (this.typeId === 'ASSASSIN' && currentMap && currentMap.id === 'ASSASSIN') this.unitType.speed = UNIT_TYPES[this.typeId].speed * 1.4;
+
+        if(this.damageFlashTimer > 0) {
+            this.damageFlashTimer--; let glow = 0xffffff;
+            this.mesh.allMeshes.forEach(c => { if(c.material.emissive) { c.material.emissive.setHex(glow); c.material.emissiveIntensity = 1.0; } }); 
+        } else if (this.damageFlashTimer === 0) {
+            this.damageFlashTimer = -1;
+            this.mesh.allMeshes.forEach(c => { if(c.material.emissive && c.userData.origEmissive) { c.material.emissive.copy(c.userData.origEmissive); c.material.emissiveIntensity = c.userData.origEmissive.getHex()>0?1:0; } });
+        }
+
+        if (this.status.fire > 0) {
+            this.status.fire--; if(this.status.fire % 10 === 0) { this.takeDamage(5, 0,0,0); spawnParticles(this.x, this.y+5, this.z, 0xf97316, 'fire', 1); }
+            if(!this.isDead) this.mesh.torsoRef.material.color.setHex(0xef4444);
+        } else if(!this.isDead && this.mesh.torsoRef) this.mesh.torsoRef.material.color.setHex(UNIT_TYPES[this.typeId].color);
+        
+        let canMove = true;
+        if (this.status.freeze > 0) { this.status.freeze--; canMove = false; if(!this.isDead) { this.mesh.torsoRef.material.color.setHex(0x06b6d4); this.mesh.allMeshes.forEach(c => { if(c.material.emissive) c.material.emissiveIntensity = 0.8; }); } }
+        if (this.status.confuse > 0) { this.status.confuse--; if(Math.random()<0.1) spawnParticles(this.x, this.radius*2, this.z, 0x22c55e, 'glow', 1); }
+        if (this.status.poly > 0) {
+            this.status.poly--; canMove = false; this.mesh.visible = false;
+            if(!this.sheepMesh) { this.sheepMesh = new THREE.Mesh(geoCache.box, new THREE.MeshBasicMaterial({color: 0xffffff})); scene.add(this.sheepMesh); }
+            this.sheepMesh.position.set(this.x, this.y + this.radius + Math.sin(Date.now()*0.01)*2, this.z); this.sheepMesh.visible = true; 
+        } else {
+            this.mesh.visible = true; if(this.sheepMesh) this.sheepMesh.visible = false;
+            if (this.isStealth) { this.stealthTimer--; if(this.stealthTimer <= 0) { this.isStealth = false; this.mesh.traverse(c => { if(c.isMesh && c.material) { c.material.transparent=false; c.material.opacity=1; }}); } }
+        }
+
+        this.x += this.vx; this.z += this.vz;
+        
+        let groundY = getGroundHeight(this.x, this.z);
+        if (this.status.levitate > 0) {
+            this.status.levitate--; this.vy = 0; 
+            this.y += Math.sin(this.status.levitate * 0.2) * 0.5; this.mesh.rotation.y += 0.05;
+            canMove = false;
+        } else if (this.typeId.includes('MAGE') || this.typeId.includes('FAIRY') || this.typeId.includes('FATE')) {
+            if(!this.isDead && canMove) { this.y = Math.max(groundY, this.y); this.y = GameUtils.lerp(this.y, groundY + 15 + Math.sin(Date.now() * 0.003 + this.hoverOffset) * 2, 0.1); this.vy = 0; this.vx *= 0.9; this.vz *= 0.9; }
+        } else {
+            this.y += this.vy;
+            if (this.y <= groundY) {
+                this.y = groundY; this.vx *= CONFIG.friction; this.vz *= CONFIG.friction;
+                if (groundY === -1000 && !this.isDead) { this.takeDamage(9999,0,0,0); } 
+                
+                if (this.vy < -2) { this.vy *= -0.3; if(this.mass>5) addShake(0.2); } else { this.vy = 0; this.spinX = 0; this.spinY = 0; this.spinZ = 0; }
+                
+                if (this.fsm === 'JUMP_SLAM' && this.vy <= 0 && this.y === groundY) { 
+                    this.fsm = 'SEEK'; this.attackTimer = this.unitType.cd; 
+                    this.sqY = 0.4; this.sqX = 1.6; 
+                    let r = 60, dmg = this.unitType.damage * 1.5;
+                    if(this.typeId === 'STONE_MALPH') { r = 80; dmg = 400; spawnGroundMark(this.x, this.z, 40, 0x111111, true); }
+                    if(this.typeId === 'RAGE_SETT') { r = 50; dmg = 300; }
+                    if(this.typeId === 'ELASTIC_ZAC') { r = 40; }
+                    explode(this.x, this.z, r, dmg, this.team, true); 
+                    if(this.typeId === 'DUELIST' && Math.random()<0.2) this.status.stun = 60;
+                }
+                if (this.typeId === 'SPRING_SLD' && !this.isDead && canMove) { this.vy = 15; if (Math.random()<0.1) { this.vy = 30; this.fsm = 'JUMP_SLAM'; } } 
+            } else this.vy -= CONFIG.gravity;
+        }
+
+        let spd = Math.hypot(this.vx, this.vz); let totalSpd = Math.hypot(spd, this.vy);
+        if (totalSpd > 1.5 && !this.isDead && this.status.poly <= 0 && state === 'BATTLE') if (Math.random() < 0.3) spawnGhost(this);
+
+        let moveIntensity = (spd > 0.05 && canMove) ? 1 : 0; this.wobble += (spd > 0.05 ? spd : 0.05) * 0.2; let walkCycle = this.wobble * 2;
+
+        if (state === 'BATTLE' && !this.isDead && canMove) {
+            if (this.typeId === 'BOMBER') { for (let e of entities) { if (e !== this && !e.isDead && e.team !== this.team && Math.hypot(e.x - this.x, e.z - this.z) <= 35) { this.takeDamage(9999, 0, 0, 0); break; } } }
+            
+            if (this.typeId === 'ROLLING_RAM' && this.fsm === 'SEEK') { 
+                this.mesh.rotation.x += 0.8; this.unitType.speed = Math.min(3.0, this.unitType.speed + 0.1); 
+                if(Math.random()<0.3) spawnParticles(this.x, this.y+2, this.z, 0x854d0e, 'dust', 2);
+                if(this.unitType.speed > 2.0 && Math.random()<0.5) spawnGhost(this);
+                for(let e of entities) { 
+                    if(!e.isDead && e.team !== this.team && Math.hypot(e.x - this.x, e.z - this.z) < this.radius + e.radius && Math.abs(e.y - this.y) < 15) {
+                        e.takeDamage(this.unitType.damage, this.vx*5, 5, this.vz*5);
+                        this.vx *= -0.8; this.vz *= -0.8; this.unitType.speed = 0.5; spawnParticles(this.x, this.y+5, this.z, 0x854d0e, 'dust', 10); addShake(0.2); break;
+                    }
+                }
+            } else if (this.typeId === 'ROLLING_RAM') { this.mesh.rotation.x = 0; this.unitType.speed = 0.5; }
+
+            if(!this.typeId.includes('TANK') && this.typeId !== 'STONE_MALPH' && this.fsm !== 'JUMP_SLAM') { 
+                this.sqX = GameUtils.lerp(this.sqX, 1, 0.1); this.sqY = GameUtils.lerp(this.sqY, 1, 0.1); 
+            }
+            if (this.attackTimer > 0) this.attackTimer--;
+
+            switch(this.fsm) {
+                case 'STAGGER': if(--this.timer <= 0) this.fsm = 'SEEK'; break;
+                case 'JUMP_SLAM': 
+                    this.sqY = 1.0 + Math.abs(this.vy)*0.02; this.sqX = 1.0 - Math.abs(this.vy)*0.01; 
+                    if(this.target && !this.target.isDead && this.y > groundY + 5) { this.x += (this.target.x - this.x) * 0.04; this.z += (this.target.z - this.z) * 0.04; } 
+                    break;
+                case 'SPIN': 
+                    this.timer--; this.mesh.rotation.y += 0.6; this.vx += Math.cos(this.mesh.rotation.y)*0.7 + (Math.random()-0.5)*0.2; this.vz += Math.sin(this.mesh.rotation.y)*0.7 + (Math.random()-0.5)*0.2;
+                    spawnParticles(this.x + Math.cos(this.mesh.rotation.y)*this.radius*1.5, this.y + this.unitType.height*0.5, this.z - Math.sin(this.mesh.rotation.y)*this.radius*1.5, 0x1d4ed8, 'trail', 2);
+                    if(this.timer % 10 === 0) explode(this.x, this.z, 30, this.unitType.damage, this.team, false);
+                    if(this.timer <= 0 || entities.filter(e=>e.team!==this.team&&!e.isDead&&Math.hypot(e.x-this.x,e.z-this.z)<30&&Math.abs(e.y-this.y)<20).length>=2) { this.fsm = 'JUMP_SLAM'; this.vy = 25; this.timer = 0; }
+                    break;
+                case 'DAGGER_SPIN':
+                    this.timer--; this.mesh.rotation.y += 1.5; this.vx += (Math.random()-0.5)*1.5; this.vz += (Math.random()-0.5)*1.5;
+                    spawnParticles(this.x + Math.cos(this.mesh.rotation.y)*this.radius*1.5, this.y + this.unitType.height*0.5, this.z - Math.sin(this.mesh.rotation.y)*this.radius*1.5, 0x991b1b, 'trail', 2);
+                    if(this.timer % 5 === 0) explode(this.x, this.z, 25, this.unitType.damage*0.2, this.team, false);
+                    if(this.timer <= 0) this.fsm = 'SEEK';
+                    if(Math.random()<0.05) { this.fsm = 'SEEK'; this.status.stun = 30; this.spinZ = 0.5; this.vy = 5; } 
+                    break;
+                case 'EXECUTE_WINDUP':
+                    this.vx = 0; this.vz = 0; this.mesh.rotation.z = Math.PI/4; this.timer--;
+                    if (this.timer <= 0) { this.fsm = 'EXECUTE_SPIN'; this.timer = 72; this.mesh.rotation.z = 0; }
+                    break;
+                case 'EXECUTE_SPIN':
+                    this.timer--; this.mesh.rotation.y += 1.0; this.mesh.armR.rotation.x = Math.PI/2;
+                    spawnParticles(this.x + Math.cos(this.mesh.rotation.y)*this.radius*2, this.y + this.unitType.height*0.5, this.z - Math.sin(this.mesh.rotation.y)*this.radius*2, 0x8b0000, 'fire', 2);
+                    if (this.timer % 10 === 0) { explode(this.x, this.z, 25, 120, this.team, false); explode(this.x, this.z, 35, 60, this.team, true); }
+                    if (this.target && this.target.isDead) { explode(this.x, this.z, 20, 150, this.team, false); this.fsm = 'SEEK'; this.attackTimer = this.unitType.cd; }
+                    if (this.timer <= 0) { this.fsm = 'SEEK'; this.attackTimer = this.unitType.cd; if(Math.random()<0.25) { this.status.stun = 60; this.vy = 5; this.spinX = 0.5; } }
+                    break;
+                case 'DASH':
+                    this.timer--; this.vx = Math.cos(this.mesh.rotation.y)*15; this.vz = Math.sin(this.mesh.rotation.y)*15;
+                    spawnGhost(this);
+                    if (this.timer <= 0) { this.fsm = 'ATTACK'; this.timer = 5; }
+                    break;
+                case 'FATE_RECALL':
+                    this.timer--;
+                    if (this.timer <= 0 && this.linkedAllies) {
+                        this.linkedAllies.forEach(a => { if(!a.isDead && a.savedPos) { a.x = a.savedPos.x; a.z = a.savedPos.z; a.y = a.savedPos.y; a.hp = Math.min(a.maxHp, a.hp+150); spawnParticles(a.x, a.y+5, a.z, 0x0ea5e9, 'glow', 10); } });
+                        this.fsm = 'SEEK'; this.attackTimer = this.unitType.cd;
+                    }
+                    break;
+                case 'SEEK':
+                    if (this.status.stun > 0) { this.status.stun--; break; }
+                    let closest = null, minDist = Infinity;
+                    for (let e of entities) { if (e !== this && !e.isDead && (e.team !== this.team || this.status.confuse > 0)) { let d = Math.hypot(e.x - this.x, e.y - this.y, e.z - this.z); if (d < minDist) { minDist = d; closest = e; } } }
+                    this.target = closest;
+
+                    if (this.typeId === 'AXE_BERSERK' && this.target && this.target.hp < this.target.maxHp * 0.3 && this.attackTimer <= 0 && minDist < 30) { this.fsm = 'EXECUTE_WINDUP'; this.timer = 36; break; }
+                    if (this.typeId === 'CHAIN_FATE' && this.attackTimer <= 0) { 
+                        this.linkedAllies = entities.filter(e=>e.team===this.team && e!==this).sort(()=>Math.random()-0.5).slice(0,3);
+                        this.linkedAllies.forEach(a => a.savedPos = {x:a.x, y:a.y, z:a.z}); this.fsm = 'FATE_RECALL'; this.timer = 120; spawnGroundMark(this.x, this.z, 25, 0x0ea5e9, false); spawnParticles(this.x, this.y+5, this.z, 0x0ea5e9, 'glow', 20); break; 
+                    }
+                    
+                    if ((this.typeId === 'ARCHER' || this.typeId === 'INVIS_AKALI') && this.hp < this.maxHp * 0.3 && !this.isStealth && this.stealthTimer === 0) { this.isStealth = true; this.stealthTimer = 150; this.mesh.traverse(c => { if(c.isMesh && c.material) { c.material.transparent=true; c.material.opacity=0.3; }}); spawnParticles(this.x, this.y+5, this.z, 0x111111, 'smoke', 10); }
+
+                    if (this.target) {
+                        let flatDist = Math.hypot(this.target.x - this.x, this.target.z - this.z);
+                        if (this.isStealth) {
+                            if (flatDist < 80) { let angle = Math.atan2(this.z - this.target.z, this.x - this.target.x); this.vx += Math.cos(angle) * this.unitType.speed * 0.4; this.vz += Math.sin(angle) * this.unitType.speed * 0.4;
+                            } else if (this.attackTimer <= 0) { this.fsm = 'ATTACK'; this.timer = 15; }
+                        } else if (flatDist < this.unitType.range && Math.abs(this.target.y - this.y) < 50) { 
+                            if (this.attackTimer <= 0) { 
+                                if (this.typeId === 'DASH_XIN') { this.fsm = 'DASH'; this.timer = 10; this.mesh.rotation.y = Math.atan2(this.target.x - this.x, this.target.z - this.z); }
+                                else { this.fsm = 'ATTACK'; this.timer = this.typeId.includes('NINJA')||this.typeId.includes('DAGGER')? 5: 15; }
+                            }
+                            else { this.vx *= 0.5; this.vz *= 0.5; } 
+                        } else { let angle = Math.atan2(this.target.z - this.z, this.target.x - this.x); this.vx += Math.cos(angle) * this.unitType.speed * 0.2; this.vz += Math.sin(angle) * this.unitType.speed * 0.2; }
+                    }
+                    break;
+                case 'ATTACK':
+                    this.timer--;
+                    if (this.timer > 0) { this.sqX = 0.8; this.sqY = 1.2; this.vx *= 0.8; this.vz *= 0.8; } 
+                    else { this.executeAttack(); this.attackTimer = this.unitType.cd; if(!['JUMP_SLAM','SPIN','EXECUTE_WINDUP','EXECUTE_SPIN','DAGGER_SPIN','FATE_RECALL'].includes(this.fsm)) this.fsm = 'SEEK'; this.sqX = 1.3; this.sqY = 0.7; } 
+                    break;
+            }
+
+            for (let e of entities) {
+                if (e !== this && !e.isDead && e.status.poly<=0) {
+                    let d = Math.hypot(e.x - this.x, e.z - this.z); let needD = this.radius + e.radius;
+                    if (d < needD && d > 0 && Math.abs(e.y - this.y) < 15) { let force = (needD - d) * 0.05; let angle = Math.atan2(this.z - e.z, this.x - e.x); this.vx += Math.cos(angle) * force; this.vz += Math.sin(angle) * force; }
+                }
+            }
+        }
+
+        this.mesh.position.set(this.x, this.y, this.z);
+        if (!this.isDead && canMove) {
+            this.mesh.scale.set(this.sqX, this.sqY, this.sqX); 
+            if (this.target && !['SPIN','EXECUTE_SPIN','DAGGER_SPIN','ROLLING_RAM','DASH'].includes(this.fsm) && this.typeId !== 'ROLLING_RAM') this.mesh.rotation.y = Math.atan2(this.target.x - this.x, this.target.z - this.z);
+            else if (this.isStealth && this.target) this.mesh.rotation.y = Math.atan2(this.x - this.target.x, this.z - this.target.z); 
+            
+            if (this.typeId.includes('MAGE') || this.typeId.includes('FAIRY') || this.typeId.includes('FATE')) { this.mesh.legL.rotation.x = -Math.PI/6; this.mesh.legR.rotation.x = -Math.PI/6; } 
+            else if (this.typeId !== 'ROLLING_RAM') { this.mesh.legL.rotation.x = Math.sin(walkCycle) * 0.8 * moveIntensity; this.mesh.legR.rotation.x = Math.cos(walkCycle) * 0.8 * moveIntensity; }
+
+            if (this.fsm === 'ATTACK' || this.fsm === 'JUMP_SLAM') { if (this.timer > 0 || this.fsm === 'JUMP_SLAM') { this.mesh.armR.rotation.x = GameUtils.lerp(this.mesh.armR.rotation.x, -Math.PI*0.8, 0.25); this.mesh.upperBody.rotation.y = GameUtils.lerp(this.mesh.upperBody.rotation.y, Math.PI/4, 0.25); } } 
+            else if (this.attackTimer > this.unitType.cd - 12 && !['EXECUTE_SPIN','DAGGER_SPIN'].includes(this.fsm)) { this.mesh.armR.rotation.x = GameUtils.lerp(this.mesh.armR.rotation.x, Math.PI/2.5, 0.5); this.mesh.upperBody.rotation.y = GameUtils.lerp(this.mesh.upperBody.rotation.y, -Math.PI/6, 0.4); } 
+            else if (!['EXECUTE_SPIN','DAGGER_SPIN'].includes(this.fsm)) { this.mesh.upperBody.rotation.y = GameUtils.lerp(this.mesh.upperBody.rotation.y, 0, 0.1); this.mesh.armL.rotation.x = GameUtils.lerp(this.mesh.armL.rotation.x, Math.cos(walkCycle) * 0.5 * moveIntensity, 0.2); this.mesh.armR.rotation.x = GameUtils.lerp(this.mesh.armR.rotation.x, Math.sin(walkCycle) * 0.5 * moveIntensity, 0.2); }
+            
+            if (this.typeId !== 'ROLLING_RAM') { this.mesh.upperBody.rotation.z = Math.sin(walkCycle * 0.5) * 0.1 * moveIntensity; this.mesh.upperBody.rotation.x = Math.cos(walkCycle) * 0.05 * moveIntensity + 0.05; }
+        } else if (this.isDead) {
+            if (this.y > groundY + 2) { this.rotX += this.spinX; this.rotY += this.spinY; this.rotZ += this.spinZ; } else { this.rotX = GameUtils.lerp(this.rotX, Math.PI/2, 0.2); this.rotY = 0; this.rotZ = 0; }
+            this.mesh.rotation.set(this.rotX, this.rotY, this.rotZ);
+            this.mesh.position.y = groundY + this.radius; this.mesh.upperBody.rotation.z = this.fallDir * Math.PI/4;
+            this.mesh.legL.rotation.x = -Math.PI/4; this.mesh.legR.rotation.x = Math.PI/4;
+        }
+
+        if (!this.isDead) {
+            let currentHeight = this.unitType.height * this.sqY + this.radius; let offset = this.typeId.includes('MAGE') ? 6 : 3;
+            this.healthBarGroup.position.set(this.x, this.y + currentHeight + offset, this.z); this.healthBarGroup.quaternion.copy(camera.quaternion); 
+            this.healthBarFg.scale.x = Math.max(0.001, this.hp / this.maxHp); this.healthBarGroup.visible = !(this.status.poly > 0 || this.isStealth); 
+        } else this.healthBarGroup.visible = false;
+    }
+
+    executeAttack() {
+        if (!this.target || this.target.isDead) return;
+        let dx = this.target.x - this.x, dz = this.target.z - this.z; let angle = Math.atan2(dz, dx), dist = Math.hypot(dx, dz);
+
+        let finalDmg = this.unitType.damage;
+        if (this.isStealth) finalDmg *= 2;
+        if (this.typeId === 'RAGE_SETT') finalDmg += (this.maxHp - this.hp) * 0.2; 
+
+        if (this.typeId === 'MAGE_BOSS') {
+            if (dist < 40 && this.novaCooldown <= 0) {
+                this.novaCooldown = 1800; 
+                createProjectile(this.x, this.y+5, this.z, this.target, finalDmg * 1.2, this.team, 'ARCANE_NOVA');
+                spawnGroundMark(this.x, this.z, 60, 0x3b0764, true); 
+                triggerHitStop(4); addShake(0.8); spawnParticles(this.x, this.y+10, this.z, 0xa855f7, 'glow', 30);
+            } else {
+                if (Math.random() < 0.4) {
+                    for(let i=0; i<5; i++) { setTimeout(() => { if(!this.isDead && this.target) { let mx = this.target.x + (Math.random()-0.5)*80; let mz = this.target.z + (Math.random()-0.5)*80; createProjectile(mx, 300 + Math.random()*50, mz, {x: mx, y: 0, z: mz, unitType: {height: 0}}, finalDmg * 1.5, this.team, 'METEOR'); spawnGroundMark(mx, mz, 40, 0xa855f7, false); } }, i * 200); }
+                    triggerHitStop(6); addShake(1.5); spawnParticles(this.x, this.y+10, this.z, 0xa855f7, 'glow', 30);
+                } else {
+                    createProjectile(this.x, this.y + this.unitType.height * 0.5, this.z, this.target, finalDmg * 2.0, this.team, 'GIANT_ORB');
+                    this.vx -= Math.cos(angle)*8; this.vz -= Math.sin(angle)*8; 
+                    spawnParticles(this.x, this.y+10, this.z, 0xd946ef, 'glow', 20);
+                }
+            }
+        }
+        else if (this.typeId === 'ARCHER' || this.typeId === 'SNIPER_CAIT') { createProjectile(this.x, this.y+this.unitType.height, this.z, this.target, finalDmg, this.team, this.typeId==='SNIPER_CAIT'?'PIERCE':'ARROW'); }
+        else if (this.typeId === 'ROCKET_GIRL') { createProjectile(this.x, this.y+this.unitType.height, this.z, this.target, finalDmg, this.team, Math.random()<0.3?'MEGA_ROCKET':'ROCKET'); this.vx -= Math.cos(angle)*5; this.vz -= Math.sin(angle)*5; }
+        else if (this.typeId === 'BOOMERANG') { createProjectile(this.x, this.y+this.unitType.height, this.z, this.target, finalDmg, this.team, 'BOOMERANG'); }
+        else if (this.typeId === 'ARROW_ASHE') { for(let i=0; i<3; i++) createProjectile(this.x+(Math.random()-0.5)*20, this.y+150, this.z+(Math.random()-0.5)*20, this.target, finalDmg*0.3, this.team, 'ICE_ARROW'); }
+        else if (this.typeId === 'FIRE_ANNIE') { createProjectile(this.x, this.y+this.unitType.height, this.z, this.target, finalDmg, this.team, 'FIRE_ORB'); }
+        else if (this.typeId === 'STORM_LUX') { if(Math.random()<0.2) { createProjectile(this.x, this.y+this.unitType.height, this.z, this.target, finalDmg*1.5, this.team, 'WIDE_BEAM'); this.vx -= Math.cos(angle)*10; this.vz -= Math.sin(angle)*10; this.spinX=0.2; } else { lightnings.push(new Lightning(this.x, this.y+this.unitType.height, this.z, this.target.x, this.target.y+5, this.target.z, 0xfde047)); this.target.takeDamage(finalDmg, 0,0,0); triggerHitStop(3); } }
+        else if (this.typeId === 'DRONE_CTRL') { for(let i=0; i<3; i++) setTimeout(()=> { if(!this.isDead && this.target && !this.target.isDead) createProjectile(this.x, this.y+this.unitType.height+10, this.z, this.target, finalDmg*0.3, this.team, 'BEAM'); }, i*100); }
+        else if (this.typeId === 'HOOK_BLITZ' || this.typeId === 'ANCHOR_NAUT') { createProjectile(this.x, this.y+this.unitType.height, this.z, this.target, finalDmg, this.team, this.typeId==='ANCHOR_NAUT'?'WAVE':'HOOK'); }
+        else if (this.typeId === 'BANANA_KNT') { for(let i=0; i<4; i++) createProjectile(this.x, this.y+this.unitType.height, this.z, this.target, finalDmg, this.team, 'BANANA'); }
+        else if (this.typeId === 'GAS_GUY') { createProjectile(this.x, this.y+this.unitType.height, this.z, this.target, finalDmg, this.team, 'GAS'); }
+        else if (this.typeId === 'PORTAL_ZOE') { createProjectile(this.x, this.y+this.unitType.height, this.z, this.target, finalDmg, this.team, 'PORTAL_BOLT'); if(Math.random()<0.85) { this.x += (Math.random()-0.5)*100; this.z += (Math.random()-0.5)*100; } else { this.x = 1200; this.z = 1200; } spawnParticles(this.x, this.y+5, this.z, 0xd946ef, 'glow', 10); }
+        else if (this.typeId === 'MAGNET') { createProjectile(this.x, this.y+this.unitType.height, this.z, this.target, finalDmg, this.team, 'MAGNET'); }
+        else if (this.typeId === 'GRAVITY_MAGE') { createProjectile(this.target.x, this.target.y+5, this.target.z, null, finalDmg, this.team, 'BLACK_HOLE'); } 
+        else if (this.typeId === 'WIND_FAIRY') { createProjectile(this.x, this.y+5, this.z, this.target, finalDmg, this.team, 'TORNADO'); } 
+        else if (this.typeId === 'DUELIST') { this.fsm = 'SPIN'; this.timer = 180; }
+        else if (this.typeId === 'DAGGER_KATA') { this.fsm = 'DAGGER_SPIN'; this.timer = 60; }
+        else if (this.typeId === 'AXE_BERSERK') { this.status.rage++; this.target.takeDamage(finalDmg * (1+this.status.rage*0.1), Math.cos(angle)*5, 0, Math.sin(angle)*5); }
+        else if (this.typeId === 'CLONE_WUKONG' && !this.isClone && this.attackCount === 0) { this.attackCount++; for(let i=0; i<2; i++) entities.push(new Unit(this.x+(Math.random()-0.5)*20, this.y, this.z+(Math.random()-0.5)*20, this.team, 'CLONE_WUKONG', true)); this.target.takeDamage(finalDmg, Math.cos(angle)*2, 0, Math.sin(angle)*2); }
+        else if (this.typeId === 'DASH_XIN') { this.dashCount = (this.dashCount||0)+1; let isKnock = this.dashCount%3===0; this.target.takeDamage(finalDmg*(isKnock?2:1), Math.cos(angle)*5, isKnock?15:0, Math.sin(angle)*5); if(isKnock) triggerHitStop(3); }
+        else if (this.typeId === 'SHADOW_ZED') { this.shadowCount = (this.shadowCount||0)+1; if(this.shadowCount >= 2 && !this.clone) { this.shadowCount = 0; this.clone = new Unit(this.x+(Math.random()-0.5)*30, this.y, this.z+(Math.random()-0.5)*30, this.team, 'SHADOW_ZED', true); this.clone.mesh.traverse(c=>{if(c.isMesh&&c.material)c.material.color.setHex(0x111111)}); entities.push(this.clone); } spawnGhost(this); this.x = this.target.x - Math.cos(angle)*10; this.z = this.target.z - Math.sin(angle)*10; this.target.takeDamage(finalDmg, Math.cos(angle)*2, 0, Math.sin(angle)*2); }
+        else if (this.typeId === 'BLINK_KASS') { this.blinkStack = (this.blinkStack||0)+1; let tx = this.target.x+(Math.random()-0.5)*10, tz = this.target.z+(Math.random()-0.5)*10; if(this.blinkStack > 5 && Math.random()<0.2) { tx += (Math.random()-0.5)*100; tz += (Math.random()-0.5)*100; } spawnParticles(this.x, this.y+5, this.z, 0x7e22ce, 'glow', 5); this.x = tx; this.y = getGroundHeight(tx, tz); this.z = tz; spawnParticles(this.x, this.y+5, this.z, 0x7e22ce, 'glow', 10); explode(this.x, this.z, 30, finalDmg*(1+this.blinkStack*0.1), this.team, false); }
+        else if (this.typeId === 'ICE_LISS') { explode(this.x, this.z, 40, finalDmg, this.team, false); }
+        else if (this.typeId === 'NINJA' || this.typeId === 'INVIS_AKALI') { if(dist > 30) createProjectile(this.x, this.y+this.unitType.height, this.z, this.target, finalDmg, this.team, 'SHURIKEN'); else this.target.takeDamage(finalDmg, Math.cos(angle)*1, 0, Math.sin(angle)*1); } 
+        else if (this.typeId.includes('GIANT') || this.typeId.includes('STONE') || this.typeId === 'RAGE_SETT' || this.typeId === 'ELASTIC_ZAC') { 
+            this.attackCount++; if (this.attackCount >= 3 || this.typeId === 'STONE_MALPH' || this.typeId === 'ELASTIC_ZAC') { this.fsm = 'JUMP_SLAM'; this.vy = this.typeId === 'ELASTIC_ZAC' ? 30 : 15; this.vx = Math.cos(angle)*dist*0.05; this.vz = Math.sin(angle)*dist*0.05; this.attackCount = 0; } else explode(this.target.x, this.target.z, 25, finalDmg, this.team, false); 
+        }
+        else if (this.typeId === 'SPEARMAN') { this.attackCount++; let isKnockup = (this.attackCount % 3 === 0); this.target.takeDamage(finalDmg * (isKnockup? 2:1), Math.cos(angle)*(isKnockup?5:0), isKnockup? 15:0, Math.sin(angle)*(isKnockup?5:0)); if (isKnockup) triggerHitStop(2); }
+        else { if (dist <= this.unitType.range + 10) { let force = this.typeId.includes('TANK') ? 2 : 0; this.target.takeDamage(finalDmg, Math.cos(angle)*force, 0, Math.sin(angle)*force); } }
+    }
+}
+
+// --- PROJECTILES & EFFECTS ---
+function createProjectile(x, y, z, target, damage, team, type) {
+    let mesh; let color = 0xffffff;
+    if(type === 'BOMB') { mesh = new THREE.Mesh(geoCache.sphere, getMaterial(0x111827)); }
+    else if(type === 'ROCKET') { mesh = new THREE.Mesh(geoCache.cylinder, getMaterial(0xdb2777)); mesh.scale.set(0.8, 3, 0.8); mesh.rotation.x = Math.PI/2; }
+    else if(type === 'MEGA_ROCKET') { mesh = new THREE.Mesh(geoCache.cylinder, getMaterial(0xdb2777)); mesh.scale.set(1.5, 5, 1.5); mesh.rotation.x = Math.PI/2; }
+    else if(type === 'SHURIKEN' || type === 'BOOMERANG') { mesh = new THREE.Mesh(geoCache.torus, getMaterial(type==='BOOMERANG'?0xeab308:0xe2e8f0)); mesh.rotation.x=Math.PI/2; }
+    else if(type === 'ARROW' || type === 'PIERCE' || type === 'ICE_ARROW') { mesh = new THREE.Mesh(geoCache.cylinder, getMaterial(type==='ICE_ARROW'?0x38bdf8:0xffffff, type==='ICE_ARROW'?0x38bdf8:0xffffff)); mesh.scale.set(0.3, 4, 0.3); } 
+    else if(type === 'HOOK') { mesh = new THREE.Mesh(geoCache.torus, getMaterial(0xf59e0b)); }
+    else if(type === 'BEAM' || type === 'PORTAL_BOLT') { mesh = new THREE.Mesh(geoCache.box, getMaterial(type==='PORTAL_BOLT'?0xd946ef:0x06b6d4, type==='PORTAL_BOLT'?0xd946ef:0x06b6d4)); mesh.scale.set(0.5, 0.5, 4); }
+    else if(type === 'WIDE_BEAM') { mesh = new THREE.Mesh(geoCache.box, getMaterial(0xfde047, 0xfde047)); mesh.scale.set(2, 2, 4); }
+    else if(type === 'BANANA') { mesh = new THREE.Mesh(geoCache.box, getMaterial(0xfacc15)); mesh.scale.set(1.5, 0.5, 0.5); }
+    else if(type === 'BLACK_HOLE') { let mat = getMaterial(0x110033, 0x4338ca); mat.blending = THREE.AdditiveBlending; mat.depthWrite = false; mesh = new THREE.Mesh(geoCache.sphere, mat); mesh.scale.set(3,3,3); }
+    else if(type === 'TORNADO') { let mat = getMaterial(0xcccccc, 0xdddddd); mat.transparent = true; mat.opacity = 0.5; mat.depthWrite = false; mesh = new THREE.Mesh(geoCache.cone, mat); mesh.scale.set(4, 15, 4); mesh.position.y += 7.5; }
+    else if(type === 'WAVE') { mesh = new THREE.Mesh(geoCache.box, getMaterial(0x0ea5e9, 0x0ea5e9)); mesh.scale.set(10, 2, 2); }
+    else if(type === 'METEOR') { let mat = getMaterial(0x9333ea, 0xa855f7); mat.blending = THREE.AdditiveBlending; mesh = new THREE.Mesh(geoCache.sphere, mat); mesh.scale.set(12, 12, 12); }
+    else if(type === 'ARCANE_NOVA') { let mat = getMaterial(0xd8b4fe, 0xa855f7); mat.transparent = true; mat.opacity = 0.9; mat.blending = THREE.AdditiveBlending; mat.depthWrite = false; mesh = new THREE.Mesh(new THREE.TorusGeometry(1, 0.8, 16, 32), mat); mesh.rotation.x = Math.PI/2; mesh.scale.set(1, 1, 1); }
+    else if(type === 'GIANT_ORB') { let mat = getMaterial(0xd8b4fe, 0xd946ef); mat.transparent = true; mat.opacity = 0.9; mat.blending = THREE.AdditiveBlending; mat.depthWrite = false; mesh = new THREE.Mesh(geoCache.sphere, mat); mesh.scale.set(6, 6, 6); }
+    else {
+        if(type==='WIND') color = 0xd1d5db; if(type==='WATER') color = 0x3b82f6; if(type==='FIRE' || type==='FIRE_ORB') color = 0xef4444; if(type==='POLYMORPH' || type==='PORTAL') color = 0xfbcfe8; if(type==='GAS') color = 0x22c55e; if(type==='MAGNET') color = 0x0284c7;
+        let mat = getMaterial(color, color); mat.blending = THREE.AdditiveBlending; mat.depthWrite = false; mesh = new THREE.Mesh(geoCache.sphere, mat); mesh.scale.set(2,2,2);
+    }
+    
+    mesh.position.set(x, y, z); scene.add(mesh);
+    let vx = 0, vz = 0, initialVy = 0;
+    
+    if (target) {
+        let dist = Math.hypot(target.x - x, target.z - z); let spd = (type==='ARROW' || type==='PIERCE' || type==='ICE_ARROW' ? 10 : (type==='GIANT_ORB' ? 12 : (type==='BEAM'||type==='WIDE_BEAM'||type==='PORTAL_BOLT'? 15 : 4.0))); let time = dist / spd; let angle = Math.atan2(target.z - z, target.x - x);
+        if(type==='ROCKET'||type==='MEGA_ROCKET') angle += (Math.random()-0.5)*0.5; 
+        initialVy = ((target.y + (type === 'ARROW' || type === 'PIERCE' || type === 'BOMB' || type==='ROCKET' || type==='MEGA_ROCKET' || type === 'GIANT_ORB' ? target.unitType.height/2 : 5)) - y) / time; 
+        if (type === 'GIANT_ORB') initialVy += 3;
+        vx = Math.cos(angle)*spd; vz = Math.sin(angle)*spd;
+    }
+    
+    if(type === 'FIRE_ORB' || type === 'BANANA') { initialVy = 8; vx += (Math.random()-0.5)*3; vz += (Math.random()-0.5)*3; } 
+    if(type === 'BLACK_HOLE' || type === 'TORNADO' || type === 'ARCANE_NOVA') { vx = 0; vz = 0; initialVy = 0; }
+    if(type === 'METEOR') { vx = 0; vz = 0; initialVy = -10; }
+    if(type === 'WAVE') { initialVy = 0; }
+    
+    projectiles.push({ mesh: mesh, team: team, damage: damage, type: type, vx: vx, vz: vz, vy: initialVy, isDead: false, color: color, origin: {x:x, z:z}, pierced: [], life: (type==='BLACK_HOLE'||type==='TORNADO')?120:(type==='BANANA'?300:1000) });
+}
+
+function updateProjectiles() {
+    for (let p of projectiles) {
+        if(p.isDead) continue;
+        p.life--;
+        if (p.life <= 0) { 
+            if(p.type === 'BLACK_HOLE') explode(p.mesh.position.x, p.mesh.position.z, 60, p.damage*3, p.team, true);
+            p.isDead = true; scene.remove(p.mesh); continue; 
+        }
+
+        // Map Mechanics on Projectiles
+        if (currentMap && currentMap.id === 'RANGED' && p.type !== 'BLACK_HOLE' && p.type !== 'TORNADO') { p.vx += 0.2; } // Wind
+
+        p.mesh.position.x += p.vx; p.mesh.position.y += p.vy; p.mesh.position.z += p.vz;
+        let groundY = getGroundHeight(p.mesh.position.x, p.mesh.position.z);
+        
+        if (p.type === 'GIANT_ORB') {
+            p.mesh.rotation.y += 0.2; p.mesh.rotation.x += 0.2;
+            spawnParticles(p.mesh.position.x+(Math.random()-0.5)*5, p.mesh.position.y+(Math.random()-0.5)*5, p.mesh.position.z+(Math.random()-0.5)*5, 0xd946ef, 'glow', 3);
+        }
+
+        if (Math.random() < 0.5 && !['BOMB','BLACK_HOLE','TORNADO','BANANA','WAVE','ARCANE_NOVA','GIANT_ORB'].includes(p.type)) spawnParticles(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, p.type==='METEOR'?0xa855f7:p.color, p.type==='BEAM'?'beam':(p.type==='METEOR'?'fire':'trail'), p.type==='METEOR'?5:1);
+
+        if (p.type === 'BOMB' || p.type === 'ROCKET' || p.type === 'MEGA_ROCKET') { p.mesh.rotation.x += 0.2; p.mesh.rotation.z += 0.2; if(p.type.includes('ROCKET')) p.vy -= CONFIG.gravity * 0.1; } 
+        else if (['ARROW','PIERCE','ICE_ARROW','BEAM','WIDE_BEAM','PORTAL_BOLT'].includes(p.type)) { p.mesh.lookAt(p.mesh.position.x + p.vx, p.mesh.position.y + p.vy, p.mesh.position.z + p.vz); p.mesh.rotation.x += Math.PI/2; p.vy -= CONFIG.gravity * 0.05; } 
+        else if (p.type === 'SHURIKEN' || p.type === 'BOOMERANG') { p.mesh.rotation.z += 0.5; p.vy = 0; } 
+        else if (p.type === 'FIRE_ORB' || p.type === 'BANANA') { p.vy -= CONFIG.gravity * 0.5; p.mesh.rotation.x += 0.2; p.mesh.rotation.z += 0.2; }
+        else if (p.type === 'BLACK_HOLE') { p.mesh.scale.setScalar(3 + Math.sin(Date.now()*0.01)*1); p.mesh.rotation.y += 0.2; spawnParticles(p.mesh.position.x+(Math.random()-0.5)*40, p.mesh.position.y+(Math.random()-0.5)*40, p.mesh.position.z+(Math.random()-0.5)*40, 0x4338ca, 'glow', 1); }
+        else if (p.type === 'TORNADO') { p.mesh.rotation.y += 0.5; spawnParticles(p.mesh.position.x+(Math.random()-0.5)*10, p.mesh.position.y+Math.random()*20, p.mesh.position.z+(Math.random()-0.5)*10, 0xcccccc, 'smoke', 2); }
+        else if (p.type === 'WAVE') { p.mesh.scale.x += 0.5; }
+        else if (p.type === 'METEOR') { p.mesh.rotation.x += 0.1; p.mesh.rotation.z += 0.1; }
+        else if (p.type === 'ARCANE_NOVA') { 
+            p.mesh.scale.x += 2.5; p.mesh.scale.y += 2.5; p.mesh.material.opacity -= 0.015; 
+            let edgeAngle = Math.random() * Math.PI * 2; let edgeRadius = p.mesh.scale.x;
+            spawnParticles(p.mesh.position.x + Math.cos(edgeAngle)*edgeRadius, p.mesh.position.y, p.mesh.position.z + Math.sin(edgeAngle)*edgeRadius, 0xd8b4fe, 'glow', 3);
+            if (p.mesh.scale.x > 60 || p.mesh.material.opacity <= 0) { p.isDead = true; scene.remove(p.mesh); continue; } 
+        }
+        else { p.mesh.scale.multiplyScalar(1.02); } 
+
+        // AREA EFFECTS
+        if (p.type === 'BLACK_HOLE') {
+            for(let e of entities) {
+                if(!e.isDead && e.team !== p.team && Math.hypot(e.x - p.mesh.position.x, e.y - p.mesh.position.y, e.z - p.mesh.position.z) < 50) { 
+                    e.vx += (p.mesh.position.x - e.x) * 0.05; e.vz += (p.mesh.position.z - e.z) * 0.05; e.vy += (p.mesh.position.y - e.y) * 0.05; 
+                    e.takeDamage(p.damage*0.05, 0,0,0); 
+                    e.spinX = (Math.random()-0.5)*0.5; e.spinY = (Math.random()-0.5)*0.5; e.status.stun = 10;
+                    e.sqX = GameUtils.lerp(e.sqX, 0.4, 0.2); e.sqY = GameUtils.lerp(e.sqY, 2.0, 0.2); 
+                }
+            }
+            continue;
+        }
+        if (p.type === 'TORNADO') {
+            for(let e of entities) {
+                if(!e.isDead && e.team !== p.team && Math.hypot(e.x - p.mesh.position.x, e.z - p.mesh.position.z) < 20 && Math.abs(e.y - p.mesh.position.y) < 60) { 
+                    e.vy += 2.5; e.spinY += 0.5; e.spinX += 0.2; 
+                    e.vx += (p.mesh.position.x - e.x) * 0.02 + (Math.random()-0.5)*2; e.vz += (p.mesh.position.z - e.z) * 0.02 + (Math.random()-0.5)*2;
+                    e.takeDamage(p.damage*0.05, 0,0,0); e.status.stun = 10;
+                }
+            }
+            continue;
+        }
+        if (p.type === 'WAVE') {
+            for (let e of entities) {
+                if(!e.isDead && e.team !== p.team && !p.pierced.includes(e) && Math.hypot(e.x-p.mesh.position.x, e.z-p.mesh.position.z)<p.mesh.scale.x && Math.abs(e.y-p.mesh.position.y)<20) {
+                    e.vy = 10; e.takeDamage(p.damage, 0,0,0); p.pierced.push(e); spawnParticles(e.x, e.y, e.z, 0x0ea5e9, 'glow', 5);
+                }
+            }
+            continue;
+        }
+        if (p.type === 'ARCANE_NOVA') {
+            let currentRadius = p.mesh.scale.x;
+            for(let e of entities) {
+                if(!e.isDead && e.team !== p.team && !p.pierced.includes(e) && Math.hypot(e.x - p.mesh.position.x, e.z - p.mesh.position.z) < currentRadius + e.radius && Math.abs(e.y-p.mesh.position.y)<30) {
+                    p.pierced.push(e); 
+                    e.takeDamage(p.damage, 0, 0, 0); 
+                    e.status.stun = 300; e.status.levitate = 300; e.y += 30; e.vy = 0; e.vx = 0; e.vz = 0; 
+                    spawnParticles(e.x, e.y+5, e.z, 0xa855f7, 'glow', 10); addShake(0.5);
+                }
+            }
+            continue;
+        }
+
+        // Return logic
+        if (p.type === 'BOOMERANG') {
+            if (Math.hypot(p.mesh.position.x - p.origin.x, p.mesh.position.z - p.origin.z) > 150 && !p.returning) { p.returning = true; p.pierced = []; } 
+            if (p.returning) {
+                p.vx += (p.origin.x - p.mesh.position.x)*0.05; p.vz += (p.origin.z - p.mesh.position.z)*0.05; p.vx *= 0.95; p.vz *= 0.95;
+                if (Math.hypot(p.mesh.position.x - p.origin.x, p.mesh.position.z - p.origin.z) < 15) p.isDead = true;
+            }
+        }
+
+        // Ground Hit
+        if (p.mesh.position.y <= groundY && p.type !== 'BOOMERANG') {
+            if (p.type === 'METEOR') {
+                explode(p.mesh.position.x, p.mesh.position.z, 80, p.damage, p.team, true);
+                spawnGroundMark(p.mesh.position.x, p.mesh.position.z, 40, 0x110033, true);
+                p.isDead = true; scene.remove(p.mesh); addShake(1.5); triggerHitStop(8);
+            }
+            else if (p.type === 'GIANT_ORB') {
+                explode(p.mesh.position.x, p.mesh.position.z, 60, p.damage, p.team, 'UP');
+                spawnGroundMark(p.mesh.position.x, p.mesh.position.z, 40, 0x3b0764, true);
+                p.isDead = true; scene.remove(p.mesh); addShake(1.2); triggerHitStop(5);
+            }
+            else if (p.type === 'FIRE_ORB') { 
+                p.bounces = (p.bounces||0)+1; 
+                if(p.bounces < 2) { p.vy = 8; p.vx *= 0.8; p.vz *= 0.8; p.mesh.position.y = groundY + 0.1; p.damage *= 1.2; p.mesh.scale.multiplyScalar(1.2); p.pierced = []; }
+                else { explode(p.mesh.position.x, p.mesh.position.z, 40, p.damage, p.team, false); p.isDead = true; scene.remove(p.mesh); }
+            } 
+            else if (p.type === 'BANANA') { p.mesh.position.y = groundY + 0.5; p.vy = 0; p.vx = 0; p.vz = 0; } 
+            else {
+                p.isDead = true; scene.remove(p.mesh);
+                if(p.type === 'BOMB' || p.type.includes('ROCKET')) explode(p.mesh.position.x, p.mesh.position.z, p.type==='MEGA_ROCKET'?80:(p.type==='ROCKET'?60:25), p.damage, p.team, p.type==='MEGA_ROCKET');
+                if(p.type === 'FIRE') spawnParticles(p.mesh.position.x, groundY+2, p.mesh.position.z, 0xef4444, 'fire', 5);
+            }
+        }
+
+        if (p.type === 'BANANA' && p.vy === 0) { 
+            for (let e of entities) {
+                if (!e.isDead && e.team !== p.team && Math.hypot(e.x - p.mesh.position.x, e.z - p.mesh.position.z) < 5 && Math.abs(e.y - p.mesh.position.y) < 10) {
+                    e.takeDamage(p.damage, p.vx, 5, p.vz); e.status.stun = 60; e.spinX = 0.5; e.spinZ = 0.5; e.vy = 5; spawnParticles(e.x, e.y, e.z, 0xfacc15, 'dust', 5); p.isDead = true; scene.remove(p.mesh); break;
+                }
+            }
+            continue;
+        }
+
+        // Unit Collision
+        for (let e of entities) {
+            if (!e.isDead && e.team !== p.team && !p.pierced.includes(e)) {
+                if (Math.hypot(e.x - p.mesh.position.x, e.z - p.mesh.position.z) < e.radius + 8 && Math.abs(e.y + e.unitType.height/2 - p.mesh.position.y) < e.unitType.height + 5) {
+                    
+                    if (p.type === 'PIERCE' || p.type === 'WIDE_BEAM') {
+                        e.takeDamage(p.damage, p.vx*2, 5, p.vz*2); p.pierced.push(e); spawnParticles(e.x, e.y+5, e.z, 0xff0000, 'blood', 5);
+                        if(p.pierced.length >= 5 && p.type === 'PIERCE') { p.isDead = true; scene.remove(p.mesh); }
+                    }
+                    else if (p.type === 'GIANT_ORB') {
+                        explode(p.mesh.position.x, p.mesh.position.z, 60, p.damage, p.team, 'UP');
+                        spawnGroundMark(p.mesh.position.x, p.mesh.position.z, 40, 0x3b0764, true);
+                        p.isDead = true; scene.remove(p.mesh); addShake(1.2); triggerHitStop(5);
+                        break;
+                    }
+                    else if (p.type === 'BOOMERANG') {
+                        e.takeDamage(p.damage, p.vx, 0, p.vz); p.pierced.push(e); spawnParticles(e.x, e.y+5, e.z, 0xff0000, 'blood', 5);
+                        p.bounces = (p.bounces||0)+1; p.damage *= 0.9;
+                        if (p.bounces < 3 && !p.returning) {
+                            let nextTarget = entities.find(t => t.team !== p.team && !t.isDead && !p.pierced.includes(t) && Math.hypot(t.x-e.x, t.y-e.y, t.z-e.z) < 80);
+                            if (nextTarget) { let a = Math.atan2(nextTarget.z - p.mesh.position.z, nextTarget.x - p.mesh.position.x) + (Math.random()-0.5)*0.5; let speed = Math.hypot(p.vx, p.vz); p.vx = Math.cos(a)*speed; p.vz = Math.sin(a)*speed; } 
+                            else { p.returning = true; p.pierced = []; }
+                        } else { p.returning = true; p.pierced = []; }
+                    }
+                    else if (p.type === 'FIRE_ORB') { e.takeDamage(p.damage, p.vx, 0, p.vz); p.pierced.push(e); spawnParticles(e.x, e.y+5, e.z, 0xff0000, 'blood', 5); p.vx *= -1; p.vz *= -1; }
+                    else {
+                        p.isDead = true; scene.remove(p.mesh);
+                        if(p.type === 'BOMB' || p.type.includes('ROCKET')) { explode(p.mesh.position.x, p.mesh.position.z, p.type==='MEGA_ROCKET'?80:(p.type==='ROCKET'?60:25), p.damage, p.team, p.type==='MEGA_ROCKET'); }
+                        else if(p.type === 'WIND') { e.takeDamage(p.damage, p.vx*4, 4, p.vz*4); spawnParticles(e.x, e.y+5, e.z, 0xd1d5db, 'smoke', 8); }
+                        else if(p.type === 'WATER') { e.takeDamage(p.damage,0,0,0); e.status.freeze = 150; spawnParticles(e.x, e.y+5, e.z, 0x3b82f6, 'smoke', 8); }
+                        else if(p.type === 'FIRE') { e.takeDamage(p.damage,0,0,0); e.status.fire = 200; spawnParticles(e.x, e.y+5, e.z, 0xef4444, 'fire', 15); }
+                        else if(p.type === 'POLYMORPH') { e.status.poly = 250; spawnParticles(e.x, e.y+5, e.z, 0xfbcfe8, 'smoke', 8); }
+                        else if(p.type === 'GAS') { e.status.confuse = 200; spawnParticles(e.x, e.y+5, e.z, 0x22c55e, 'smoke', 15); }
+                        else if(p.type === 'ICE_ARROW') { 
+                            e.takeDamage(p.damage,0,0,0); e.status.freeze = 150; 
+                            spawnParticles(e.x, e.y+10, e.z, 0x38bdf8, 'glow', 20); 
+                            spawnGroundMark(e.x, e.z, 15, 0x38bdf8, false); 
+                        }
+                        else if(p.type === 'HOOK' || p.type === 'MAGNET') { 
+                            e.takeDamage(p.damage, -p.vx*12, 8, -p.vz*12); 
+                            e.status.stun = 40; e.spinX = 0.2;
+                            spawnParticles(e.x, e.y, e.z, p.type==='MAGNET'?0x0284c7:0xf59e0b, 'glow', 15); 
+                            
+                            // Visual line
+                            let points = [new THREE.Vector3(p.origin.x, p.origin.y, p.origin.z), new THREE.Vector3(e.x, e.y+5, e.z)];
+                            let lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+                            let line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({color: p.color, linewidth: 3, transparent: true, opacity: 0.8}));
+                            scene.add(line); let alpha = 1.0;
+                            let fade = setInterval(() => { alpha -= 0.1; if(alpha <= 0) { clearInterval(fade); scene.remove(line); } else { line.material.opacity = alpha; } }, 50);
+                        } 
+                        else if(p.type === 'PORTAL_BOLT') { 
+                            e.y += 100; e.vy = 5; e.status.stun = 80; e.spinX = 0.2; e.spinZ = 0.2;
+                            spawnParticles(e.x, e.y+10, e.z, 0xd946ef, 'glow', 20); spawnGroundMark(e.x, e.z, 15, 0xd946ef, false); 
+                            
+                            let pIn = new THREE.Mesh(geoCache.torus, getMaterial(0xd946ef, 0xd946ef));
+                            pIn.position.set(e.x, getGroundHeight(e.x,e.z)+2, e.z); pIn.rotation.x = Math.PI/2; pIn.scale.set(3,3,3);
+                            let pOut = pIn.clone(); pOut.position.set(e.x, e.y, e.z);
+                            scene.add(pIn); scene.add(pOut);
+                            setTimeout(() => { scene.remove(pIn); scene.remove(pOut); }, 1000);
+                        } 
+                        else { e.takeDamage(p.damage, p.vx*0.2, 0, p.vz*0.2); }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    projectiles = projectiles.filter(p => !p.isDead);
+}
+
+function explode(x, z, radius, damage, team, isKnockup) {
+    addShake(isKnockup ? 0.8 : 0.5); triggerHitStop(isKnockup ? 6 : 3);
+    let gy = getGroundHeight(x, z);
+    
+    let flashMat = new THREE.MeshBasicMaterial({color: 0xffffff, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false});
+    let flash = new THREE.Mesh(geoCache.sphere, flashMat); flash.position.set(x, gy+5, z); scene.add(flash);
+    
+    let ringMat = new THREE.MeshBasicMaterial({color: 0xf97316, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false});
+    let ring = new THREE.Mesh(geoCache.torus, ringMat); ring.position.set(x, gy+2, z); ring.rotation.x = Math.PI/2; scene.add(ring);
+    
+    spawnParticles(x, gy+5, z, 0xf97316, 'fire', 15);
+    spawnGroundMark(x, z, radius * 0.8, 0x050505, true); 
+
+    let s = 1; let anim = setInterval(()=>{
+        s += 0.25; 
+        flash.scale.set(s*radius*0.15, s*radius*0.15, s*radius*0.15); flash.material.opacity -= 0.15;
+        ring.scale.set(s*radius*0.4, s*radius*0.4, s*radius*0.4); ring.material.opacity -= 0.1;
+        if(flash.material.opacity <= 0 || state === 'END') { clearInterval(anim); scene.remove(flash); scene.remove(ring); }
+    }, 16);
+
+    for (let e of entities) {
+        if (!e.isDead && (e.team !== team || e.status.confuse > 0) && e.status.poly<=0) {
+            let d = Math.hypot(e.x - x, e.z - z);
+            if (d < radius && Math.abs(e.y - gy) < 50) {
+                let power = (radius - d) / radius; let angle = Math.atan2(e.z - z, e.x - x);
+                
+                let hForce = isKnockup === 'UP' ? 1 : (isKnockup ? 10 : 0); 
+                let vForce = isKnockup === 'UP' ? 45 : (isKnockup ? 15 : 0); 
+                
+                e.takeDamage(damage * power, Math.cos(angle)*power*hForce, power*vForce, Math.sin(angle)*power*hForce);
+                if (isKnockup === 'UP') { e.spinX = (Math.random()-0.5)*0.5; e.spinZ = (Math.random()-0.5)*0.5; }
+            }
+        }
+    }
+}
+
+// --- UI & LOGIC ---
+const CLASS_LIST = Object.keys(CLASS_CONFIG);
+
+function renderUnitButtons() {
+    const selector = document.getElementById('unit-selector'); selector.innerHTML = '';
+    let foundCurrentSelected = false; let firstInClass = null;
+
+    for (const [key, data] of Object.entries(UNIT_TYPES)) {
+        if (data.class !== currentTab) continue;
+        if (!firstInClass) firstInClass = key;
+        if (key === selectedUnit) foundCurrentSelected = true;
+
+        let btn = document.createElement('div'); btn.className = `unit-btn ${key === selectedUnit ? 'active' : ''}`;
+        btn.onclick = () => { document.querySelectorAll('.unit-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); selectedUnit = key; };
+        let colorStr = '#' + data.color.toString(16).padStart(6, '0');
+        btn.innerHTML = `<div class="unit-dot" style="background-color: ${colorStr};"></div><span class="unit-name">${data.name}</span><span class="unit-cost">$${data.cost}</span>`;
+        selector.appendChild(btn);
+    }
+    
+    if (!foundCurrentSelected && firstInClass) {
+        selectedUnit = firstInClass; selector.innerHTML = '';
+        for (const [key, data] of Object.entries(UNIT_TYPES)) {
+            if (data.class !== currentTab) continue;
+            let btn = document.createElement('div'); btn.className = `unit-btn ${key === selectedUnit ? 'active' : ''}`;
+            btn.onclick = () => { document.querySelectorAll('.unit-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); selectedUnit = key; };
+            let colorStr = '#' + data.color.toString(16).padStart(6, '0');
+            btn.innerHTML = `<div class="unit-dot" style="background-color: ${colorStr};"></div><span class="unit-name">${data.name}</span><span class="unit-cost">$${data.cost}</span>`;
+            selector.appendChild(btn);
+        }
+    }
+}
+
+function initUI() {
+    // Render Map Selection
+    const mapGrid = document.getElementById('map-grid-container');
+    MAPS.forEach(m => {
+        let card = document.createElement('div');
+        card.className = 'map-card';
+        card.innerHTML = `<div class="map-icon">${m.icon}</div><div class="map-title">${m.name}</div><div class="map-desc">${m.desc}</div>`;
+        card.onclick = () => {
+            document.getElementById('map-selection').style.display = 'none';
+            document.getElementById('ui-layer').style.display = 'flex';
+            loadMap(m.id);
+            state = 'SETUP';
+        };
+        mapGrid.appendChild(card);
+    });
+
+    const tabsContainer = document.getElementById('class-tabs'); tabsContainer.innerHTML = '';
+    CLASS_LIST.forEach(cls => {
+        let btn = document.createElement('div'); btn.className = `class-tab ${cls === currentTab ? 'active' : ''}`; 
+        btn.innerHTML = `<span class="class-icon">${CLASS_CONFIG[cls].icon}</span> ${CLASS_CONFIG[cls].label}`;
+        btn.onclick = () => { document.querySelectorAll('.class-tab').forEach(b => b.classList.remove('active')); btn.classList.add('active'); currentTab = cls; renderUnitButtons(); };
+        tabsContainer.appendChild(btn);
+    });
+
+    renderUnitButtons();
+
+    document.getElementById('btn-back').onclick = () => {
+        state = 'LOBBY';
+        document.getElementById('map-selection').style.display = 'flex';
+        document.getElementById('ui-layer').style.display = 'none';
+        clearBoardAndSetup(); clearMap();
+    };
+
+    document.getElementById('btn-sandbox').onclick = () => { isSandbox = !isSandbox; updateUI(); };
+    document.getElementById('btn-start').onclick = toggleBattle;
+    document.getElementById('btn-clear').onclick = () => {
+        if (state === 'BATTLE' || state === 'END') return;
+        entities.forEach(e => { scene.remove(e.mesh); if(e.sheepMesh) scene.remove(e.sheepMesh); if(e.healthBarGroup) scene.remove(e.healthBarGroup); }); entities = [];
+        lightnings.forEach(l => scene.remove(l.mesh)); lightnings = []; ghosts.forEach(g => scene.remove(g.mesh)); ghosts = []; 
+        groundMarks.forEach(m => scene.remove(m.mesh)); groundMarks = []; 
+        teamBlueBudget = CONFIG.budget; teamRedBudget = CONFIG.budget; initialArmySetup = []; initialBlueBudget = CONFIG.budget; initialRedBudget = CONFIG.budget; updateUI();
+    };
+    document.getElementById('btn-restart').onclick = clearBoardAndSetup;
+    document.getElementById('floating-stop').onclick = toggleBattle;
+    document.getElementById('btn-close-help').onclick = function() { document.getElementById('help-text').style.display = 'none'; }
+}
+
+function updateUI() {
+    const bb = document.getElementById('blue-budget'); const rb = document.getElementById('red-budget');
+    if (isSandbox) { 
+        let bSpent = entities.filter(e=>e.team==='blue').reduce((a,b)=>a+b.unitType.cost,0); let rSpent = entities.filter(e=>e.team==='red').reduce((a,b)=>a+b.unitType.cost,0);
+        bb.innerHTML = `Cost: ${bSpent} (∞)`; bb.className = 'infinite-budget'; rb.innerHTML = `Cost: ${rSpent} (∞)`; rb.className = 'infinite-budget'; 
+        document.getElementById('btn-sandbox').style.background = '#3b82f6'; 
+    } else { 
+        bb.innerText = Math.floor(teamBlueBudget); bb.className = 'blue-text'; rb.innerText = Math.floor(teamRedBudget); rb.className = 'red-text'; 
+        document.getElementById('btn-sandbox').style.background = 'rgba(255,255,255,0.1)'; 
+    }
+    const startBtn = document.getElementById('btn-start');
+    if (state === 'SETUP') { startBtn.innerText = 'START (ENTER)'; startBtn.style.background = '#10b981'; } else { startBtn.innerText = 'STOP (ENTER)'; startBtn.style.background = '#f59e0b'; }
+}
+
+function clearBoardAndSetup() {
+    state = 'SETUP'; document.body.classList.remove('is-battle');
+    document.getElementById('end-screen').classList.remove('show-end');
+    
+    entities.forEach(e => { scene.remove(e.mesh); if(e.sheepMesh) scene.remove(e.sheepMesh); if(e.healthBarGroup) scene.remove(e.healthBarGroup); }); 
+    projectiles.forEach(p => scene.remove(p.mesh)); particles.forEach(p => scene.remove(p.mesh)); lightnings.forEach(l => scene.remove(l.mesh)); lightnings = []; ghosts.forEach(g => scene.remove(g.mesh)); ghosts = []; groundMarks.forEach(m => scene.remove(m.mesh)); groundMarks = [];
+    entities = []; projectiles = []; particles = [];
+    
+    initialArmySetup.forEach(data => { entities.push(new Unit(data.x, data.y, data.z, data.team, data.typeId)); });
+    
+    teamBlueBudget = initialBlueBudget; teamRedBudget = initialRedBudget;
+    camCtrl.targetX = 0; camCtrl.targetY = 0; camCtrl.targetZ = 0; camCtrl.radius = 800; camCtrl.theta = 0; camCtrl.phi = 1.0; updateUI();
+}
+
+function toggleBattle() {
+    if (state === 'END') { clearBoardAndSetup(); return; }
+    if (state === 'SETUP') {
+        let bCount = entities.filter(e => e.team === 'blue').length; let rCount = entities.filter(e => e.team === 'red').length;
+        if (bCount === 0 || rCount === 0) { let msg = document.getElementById('warning-msg'); msg.classList.add('show-warning'); setTimeout(() => { msg.classList.remove('show-warning'); }, 1500); return; }
+        initialArmySetup = entities.filter(e => e.typeStr === 'unit').map(u => ({ x: u.x, y: u.y, z: u.z, team: u.team, typeId: u.typeId }));
+        initialBlueBudget = teamBlueBudget; initialRedBudget = teamRedBudget;
+        camCtrl.targetX = 0; camCtrl.targetY = 0; camCtrl.targetZ = 0; camCtrl.radius = 800; camCtrl.theta = 0; camCtrl.phi = 1.0;
+        state = 'BATTLE'; document.body.classList.add('is-battle');
+    } else clearBoardAndSetup();
+    updateUI();
+}
+
+function checkWinCondition() {
+    if (state !== 'BATTLE') return; let b = false, r = false;
+    for (let e of entities) { if (!e.isDead) { if (e.team === 'blue') b = true; else r = true; } }
+    if (!b || !r) {
+        state = 'END'; 
+        let title = document.getElementById('end-title');
+        if (!b && !r) { title.innerText = "HÒA!"; title.style.color = "#fff"; } else if (!b) { title.innerText = "RED WINS!"; title.style.color = "var(--red)"; } else if (!r) { title.innerText = "BLUE WINS!"; title.style.color = "var(--blue)"; }
+        setTimeout(() => { if (state !== 'END') return; document.getElementById('end-screen').classList.add('show-end'); }, 500);
+    }
+}
+
+function placeUnit() {
+    if (state !== 'SETUP') return;
+    let type = UNIT_TYPES[selectedUnit]; let team = mouse.worldX < 0 ? 'blue' : 'red';
+    if (!isSandbox) { if (team === 'blue' && mouse.worldX > -10) return; if (team === 'red' && mouse.worldX < 10) return; if (team === 'blue' && teamBlueBudget < type.cost) return; if (team === 'red' && teamRedBudget < type.cost) return; }
+    if (entities.length >= CONFIG.maxUnits) return;
+    entities.push(new Unit(mouse.worldX, mouse.worldY, mouse.worldZ, team, selectedUnit));
+    if (!isSandbox) { if (team === 'blue') teamBlueBudget -= type.cost; else teamRedBudget -= type.cost; } updateUI();
+}
+
+function removeUnit() {
+    if (state !== 'SETUP') return; let closestI = -1, minDist = 25;
+    for (let i = 0; i < entities.length; i++) { let d = Math.hypot(entities[i].x - mouse.worldX, entities[i].y - mouse.worldY, entities[i].z - mouse.worldZ); if (d < minDist) { minDist = d; closestI = i; } }
+    if (closestI !== -1) {
+        let u = entities[closestI]; if (!isSandbox) { if (u.team === 'blue') teamBlueBudget += u.unitType.cost; else teamRedBudget += u.unitType.cost; }
+        scene.remove(u.mesh); if(u.healthBarGroup) scene.remove(u.healthBarGroup); entities.splice(closestI, 1); updateUI();
+    }
+}
+
+// --- EVENTS & MAIN LOOP ---
+window.addEventListener('resize', () => { 
+    camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); 
+    renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); 
+});
+window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if(e.key === 'Enter') toggleBattle(); });
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+renderer.domElement.addEventListener('mousedown', e => {
+    mouse.x = e.clientX; mouse.y = e.clientY;
+    if(e.button === 0) { mouse.isLeftDown = true; camDragData.startX = e.clientX; camDragData.startY = e.clientY; camDragData.isDragging = false; }
+    if(e.button === 2) { mouse.isRightDown = true; camDragData.startX = e.clientX; camDragData.startY = e.clientY; camDragData.isDragging = false; }
+    if(e.button === 1) mouse.isMidDown = true; camDragData.lastX = e.clientX; camDragData.lastY = e.clientY;
+});
+renderer.domElement.addEventListener('mousemove', e => {
+    mouse.x = e.clientX; mouse.y = e.clientY;
+    if (mouse.isLeftDown && Math.hypot(e.clientX - camDragData.startX, e.clientY - camDragData.startY) > 5) camDragData.isDragging = true;
+    if (mouse.isRightDown && Math.hypot(e.clientX - camDragData.startX, e.clientY - camDragData.startY) > 5) camDragData.isDragging = true;
+});
+renderer.domElement.addEventListener('mouseup', e => {
+    if(e.button === 0) { mouse.isLeftDown = false; if(!camDragData.isDragging && state === 'SETUP') placeUnit(); }
+    if(e.button === 2) { mouse.isRightDown = false; if(!camDragData.isDragging && state === 'SETUP') removeUnit(); }
+    if(e.button === 1) mouse.isMidDown = false;
+});
+renderer.domElement.addEventListener('wheel', e => { camCtrl.radius += e.deltaY * 0.2; });
+renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
+
+function animate() {
+    requestAnimationFrame(animate); 
+    if (state !== 'LOBBY') {
+        updateMouseWorld(); updateCameraPos();
+    }
+
+    if (state === 'SETUP') {
+        ghostMesh.visible = true; ghostMesh.position.set(mouse.worldX, mouse.worldY + UNIT_TYPES[selectedUnit].height/2, mouse.worldZ);
+        let team = mouse.worldX < 0 ? 'blue' : 'red';
+        let valid = isSandbox || ((team==='blue' && mouse.worldX <= -10 && teamBlueBudget >= UNIT_TYPES[selectedUnit].cost) || (team==='red' && mouse.worldX >= 10 && teamRedBudget >= UNIT_TYPES[selectedUnit].cost));
+        ghostMat.color.setHex(valid ? (team==='blue'? 0x3b82f6 : 0xef4444) : 0x64748b);
+        if (placeCooldown > 0) placeCooldown--;
+        if (mouse.isLeftDown && camDragData.isDragging && placeCooldown <= 0) { placeUnit(); placeCooldown = 6; }
+    } else ghostMesh.visible = false;
+
+    if (state !== 'END' && state !== 'LOBBY') {
+        if (hitStopFrames > 0) hitStopFrames--;
+        else {
+            updateMapMechanics();
+            for (let e of entities) e.update(); 
+            updateProjectiles(); updateGhosts();
+            particles = particles.filter(p => !p.update()); 
+            lightnings = lightnings.filter(l => !l.update());
+        }
+    }
+    
+    if (state === 'BATTLE') checkWinCondition(); 
+    composer.render();
+}
+
+initUI(); updateUI(); animate();
+</script>
+</body>
+</html>
